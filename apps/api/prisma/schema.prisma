@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TipoDocumento {
+  DNI
+  RUC10
+}
+
+enum EstadoPrestamo {
+  ACTIVO
+  CANCELADO
+}
+
+enum EstadoCuota {
+  PENDIENTE
+  PAGADA
+}
+
+model Agencia {
+  id       String   @id @default(uuid())
+  nombre   String   @unique
+  ciudad   String
+  activa   Boolean  @default(true)
+  creadaEn DateTime @default(now())
+
+  trabajadores      Trabajador[]
+  prestamos         Prestamo[]
+  clientesAtendidos ClienteAgencia[]
+}
+
+model Trabajador {
+  id           String   @id @default(uuid())
+  nombres      String
+  apellidos    String
+  correo       String   @unique
+  passwordHash String
+  activo       Boolean  @default(true)
+  agenciaId    String
+  creadoEn     DateTime @default(now())
+
+  agencia    Agencia          @relation(fields: [agenciaId], references: [id])
+  prestamos  Prestamo[]
+  atenciones ClienteAgencia[]
+
+  @@index([agenciaId])
+}
+
+model Cliente {
+  id                  String        @id @default(uuid())
+  tipoDocumento       TipoDocumento
+  numeroDocumento     String        @unique
+  nombres             String
+  apellidos           String
+  identidadVerificada Boolean       @default(false)
+  proveedorIdentidad  String?
+  verificadoEn        DateTime?
+  creadoEn            DateTime      @default(now())
+  actualizadoEn       DateTime      @updatedAt
+
+  prestamos        Prestamo[]
+  agenciasAtencion ClienteAgencia[]
+}
+
+// Un cliente es único para toda la financiera.
+// Esta tabla representa en qué agencias fue registrado o atendido.
+model ClienteAgencia {
+  clienteId    String
+  agenciaId    String
+  trabajadorId String
+  vinculadaEn  DateTime @default(now())
+
+  cliente    Cliente    @relation(fields: [clienteId], references: [id])
+  agencia    Agencia    @relation(fields: [agenciaId], references: [id])
+  trabajador Trabajador @relation(fields: [trabajadorId], references: [id])
+
+  @@id([clienteId, agenciaId])
+  @@index([agenciaId])
+  @@index([trabajadorId])
+}
+
+model Prestamo {
+  id           String @id @default(uuid())
+  clienteId    String
+  agenciaId    String
+  trabajadorId String
+
+  monto                    Decimal        @db.Decimal(12, 2)
+  plazoMeses               Int
+  tea                      Decimal        @default(0.30) @db.Decimal(8, 6)
+  baseDias                 Int            @default(360)
+  diasPeriodo              Int            @default(30)
+  fechaPrestamo            DateTime       @db.Date
+  // Documento presentado para ESTA operación. Puede ser distinto al principal del cliente.
+  // Nullable solo por compatibilidad con préstamos registrados antes de esta actualización.
+  tipoDocumentoOperacion   TipoDocumento?
+  numeroDocumentoOperacion String?
+  cuotaFija                Decimal        @db.Decimal(12, 2)
+  interesTotal             Decimal        @db.Decimal(12, 2)
+  montoTotal               Decimal        @db.Decimal(12, 2)
+  estado                   EstadoPrestamo @default(ACTIVO)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  cliente    Cliente    @relation(fields: [clienteId], references: [id])
+  agencia    Agencia    @relation(fields: [agenciaId], references: [id])
+  trabajador Trabajador @relation(fields: [trabajadorId], references: [id])
+  cuotas     Cuota[]
+
+  @@index([clienteId, estado])
+  @@index([agenciaId])
+  @@index([trabajadorId])
+}
+
+model Cuota {
+  id               String   @id @default(uuid())
+  prestamoId       String
+  numeroCuota      Int
+  fechaVencimiento DateTime @db.Date
+
+  capital       Decimal @db.Decimal(12, 2)
+  interes       Decimal @db.Decimal(12, 2)
+  montoCuota    Decimal @db.Decimal(12, 2)
+  saldoRestante Decimal @db.Decimal(12, 2)
+
+  estado   EstadoCuota @default(PENDIENTE)
+  creadaEn DateTime    @default(now())
+
+  prestamo Prestamo @relation(fields: [prestamoId], references: [id])
+
+  @@unique([prestamoId, numeroCuota])
+  @@index([fechaVencimiento])
+}

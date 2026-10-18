@@ -1,0 +1,348 @@
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+
+type Trabajador = { agencia: { nombre: string } }
+type TipoDocumento = 'DNI' | 'RUC10'
+type DocumentoOperacion = { tipoDocumento: TipoDocumento; numeroDocumento: string }
+type Cliente = { id: string; nombres: string; apellidos: string; numeroDocumento: string; tipoDocumento: TipoDocumento; documentoOperacion?: DocumentoOperacion }
+type Fila = { numeroCuota: number; fechaVencimiento: string; capital: string; interes: string; montoCuota: string; saldoRestante: string; estado?: 'PENDIENTE' | 'PAGADA' }
+type Cronograma = { cuotaFija: string; montoTotal: string; interesTotal: string; tasaPeriodoPorcentaje: number; avisoRedondeo: string | null; cuotas: Fila[] }
+type Preview = { comprometido: string; disponible: string; cronograma: Cronograma; documentoOperacion: DocumentoOperacion }
+type PrestamoLista = { id: string; fechaPrestamo: string; monto: string; plazoMeses: number; cuotaFija: string; estado: string; tipoDocumentoOperacion: TipoDocumento | null; numeroDocumentoOperacion: string | null; cliente: { nombres: string; apellidos: string; numeroDocumento: string; tipoDocumento: TipoDocumento }; agencia: { nombre: string } }
+type Detalle = { id: string; tipoDocumentoOperacion: TipoDocumento | null; numeroDocumentoOperacion: string | null; monto: string; fechaPrestamo: string; plazoMeses: number; cuotaFija: string; interesTotal: string; montoTotal: string; baseDias: number; diasPeriodo: number; cliente: Cliente; agencia: { nombre: string }; cuotas: Fila[] }
+type EstadoFiltro = 'TODOS' | 'ACTIVO' | 'CANCELADO'
+type PaginaPrestamos = { prestamos: PrestamoLista[]; total: number; pagina: number; porPagina: number; totalPaginas: number }
+
+const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+const moneda = (v: string) => `S/ ${Number(v).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' })
+const FACTORES_RUC = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+function generarRuc10(dni: string) {
+  const base = `10${dni}`
+  const suma = [...base].reduce((total, cifra, i) => total + Number(cifra) * FACTORES_RUC[i], 0)
+  return `${base}${(11 - (suma % 11)) % 10}`
+}
+function documentosDisponibles(cliente: Cliente): DocumentoOperacion[] {
+  const dni = cliente.tipoDocumento === 'DNI' ? cliente.numeroDocumento : cliente.numeroDocumento.slice(2, 10)
+  return [
+    { tipoDocumento: 'DNI', numeroDocumento: dni },
+    { tipoDocumento: 'RUC10', numeroDocumento: generarRuc10(dni) },
+  ]
+}
+function elegirDocumento(cliente: Cliente, consultado: string): DocumentoOperacion {
+  return documentosDisponibles(cliente).find(d => d.numeroDocumento === consultado.trim())
+    ?? { tipoDocumento: cliente.tipoDocumento, numeroDocumento: cliente.numeroDocumento }
+}
+const rotuloDocumento = (d: DocumentoOperacion) => `${d.tipoDocumento === 'RUC10' ? 'RUC 10' : 'DNI'} ${d.numeroDocumento}`
+// Los estados de esta pantalla se derivan de las fechas y de pagos REGISTRADOS.
+// No crea pagos ni aplica mora; es una lectura del cronograma actual.
+function estadoVisible(cuota: Fila): 'Pagada' | 'Vencida' | 'Pendiente' {
+  if (cuota.estado === 'PAGADA') return 'Pagada'
+  return cuota.fechaVencimiento.slice(0, 10) < hoy ? 'Vencida' : 'Pendiente'
+}
+
+
+export default function PrestamosPanel({ token, trabajador, clienteInicial = null }: { token: string; trabajador: Trabajador; clienteInicial?: Cliente | null }) {
+  const [textoCliente, setTextoCliente] = useState(clienteInicial ? `${clienteInicial.apellidos}, ${clienteInicial.nombres} · ${rotuloDocumento(clienteInicial.documentoOperacion ?? elegirDocumento(clienteInicial, clienteInicial.numeroDocumento))}` : '')
+  const [coincidencias, setCoincidencias] = useState<Cliente[]>([])
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(clienteInicial)
+  const [documentoOperacion, setDocumentoOperacion] = useState<DocumentoOperacion | null>(clienteInicial ? (clienteInicial.documentoOperacion ?? elegirDocumento(clienteInicial, clienteInicial.numeroDocumento)) : null)
+  const [buscandoCliente, setBuscandoCliente] = useState(false)
+  const [errorCliente, setErrorCliente] = useState('')
+  const [prestamos, setPrestamos] = useState<PrestamoLista[]>([])
+  const [clienteId, setClienteId] = useState(clienteInicial?.id ?? '')
+  const [monto, setMonto] = useState('1000')
+  const [plazoMeses, setPlazoMeses] = useState(12)
+  const [fechaPrestamo, setFechaPrestamo] = useState(hoy)
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const [detalle, setDetalle] = useState<Detalle | null>(null)
+  const [modalAbierto, setModalAbierto] = useState(false)
+  const [error, setError] = useState('')
+  const [errorLista, setErrorLista] = useState('')
+  const [mensaje, setMensaje] = useState('')
+  const [ocupado, setOcupado] = useState(false)
+  const [cargandoLista, setCargandoLista] = useState(false)
+  const [textoBusqueda, setTextoBusqueda] = useState('')
+  const [filtroEstado, setFiltroEstado] = useState<EstadoFiltro>('TODOS')
+  const [busquedaAplicada, setBusquedaAplicada] = useState('')
+  const [estadoAplicado, setEstadoAplicado] = useState<EstadoFiltro>('TODOS')
+  const [pagina, setPagina] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [totalPaginas, setTotalPaginas] = useState(1)
+  const [recargar, setRecargar] = useState(0)
+  const previewRef = useRef<HTMLElement | null>(null)
+  const cerrarRef = useRef<HTMLButtonElement | null>(null)
+
+  async function peticion<T>(url: string, options: RequestInit = {}): Promise<T> {
+    const respuesta = await fetch(`${BASE}${url}`, {
+      ...options,
+      headers: { Authorization: `Bearer ${token}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
+      cache: 'no-store',
+    })
+    const data: T & { message?: string } = await respuesta.json()
+    if (!respuesta.ok) throw new Error(data.message ?? 'No fue posible completar la operación.')
+    return data
+  }
+
+  useEffect(() => {
+    const busqueda = textoCliente.trim()
+    if (clienteSeleccionado || busqueda.length < 2) {
+      setCoincidencias([])
+      setBuscandoCliente(false)
+      return
+    }
+    const abort = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setBuscandoCliente(true)
+      setErrorCliente('')
+      try {
+        const datos = await peticion<{ clientes: Cliente[] }>(
+          `/api/clientes/buscar?q=${encodeURIComponent(busqueda)}`,
+          { signal: abort.signal },
+        )
+        if (!abort.signal.aborted) setCoincidencias(datos.clientes)
+      } catch (e) {
+        if (!abort.signal.aborted) {
+          setCoincidencias([])
+          setErrorCliente(e instanceof Error ? e.message : 'No se pudo buscar el cliente.')
+        }
+      } finally {
+        if (!abort.signal.aborted) setBuscandoCliente(false)
+      }
+    }, 350)
+    return () => { window.clearTimeout(timer); abort.abort() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, textoCliente, clienteSeleccionado])
+
+  function escribirBusquedaCliente(texto: string) {
+    setTextoCliente(texto)
+    setClienteId('')
+    setClienteSeleccionado(null)
+    setDocumentoOperacion(null)
+    setCoincidencias([])
+    setErrorCliente('')
+    invalidar()
+  }
+
+  function seleccionarCliente(cliente: Cliente) {
+    setClienteId(cliente.id)
+    setClienteSeleccionado(cliente)
+    const seleccionado = elegirDocumento(cliente, textoCliente)
+    setDocumentoOperacion(seleccionado)
+    setTextoCliente(`${cliente.apellidos}, ${cliente.nombres} · ${rotuloDocumento(seleccionado)}`)
+    setCoincidencias([])
+    setErrorCliente('')
+    invalidar()
+  }
+
+  useEffect(() => {
+    let cancelado = false
+    async function cargarPrestamos() {
+      setCargandoLista(true); setErrorLista('')
+      try {
+        const params = new URLSearchParams({ pagina: String(pagina), buscar: busquedaAplicada, estado: estadoAplicado })
+        const resultado = await peticion<PaginaPrestamos>(`/api/prestamos?${params.toString()}`)
+        if (cancelado) return
+        setPrestamos(resultado.prestamos)
+        setTotal(resultado.total)
+        setTotalPaginas(resultado.totalPaginas)
+      } catch (e) {
+        if (!cancelado) setErrorLista(e instanceof Error ? e.message : 'No se pudo cargar la lista.')
+      } finally {
+        if (!cancelado) setCargandoLista(false)
+      }
+    }
+    void cargarPrestamos()
+    return () => { cancelado = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, pagina, busquedaAplicada, estadoAplicado, recargar])
+
+  useEffect(() => {
+    if (preview) previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [preview])
+
+  useEffect(() => {
+    if (!modalAbierto) return
+    const overflowAnterior = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    cerrarRef.current?.focus()
+    function cerrarConEscape(e: KeyboardEvent) { if (e.key === 'Escape') setModalAbierto(false) }
+    window.addEventListener('keydown', cerrarConEscape)
+    return () => { document.body.style.overflow = overflowAnterior; window.removeEventListener('keydown', cerrarConEscape) }
+  }, [modalAbierto])
+
+  function invalidar() { setPreview(null); setError(''); setMensaje('') }
+  const formulario = { clienteId, monto: monto.trim(), plazoMeses, fechaPrestamo, tipoDocumentoOperacion: documentoOperacion?.tipoDocumento, numeroDocumentoOperacion: documentoOperacion?.numeroDocumento }
+
+  async function simular(e: FormEvent) {
+    e.preventDefault(); setOcupado(true); setError(''); setMensaje(''); setPreview(null)
+    try {
+      const resultado = await peticion<Preview>('/api/prestamos/simular', { method: 'POST', body: JSON.stringify(formulario) })
+      setPreview(resultado)
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo calcular el cronograma.') }
+    finally { setOcupado(false) }
+  }
+
+  async function confirmar() {
+    if (!preview || !window.confirm('¿Confirmas el registro del préstamo y de todas sus cuotas?')) return
+    setOcupado(true); setError('')
+    try {
+      const guardado = await peticion<{ id: string }>('/api/prestamos', { method: 'POST', body: JSON.stringify(formulario) })
+      const resultado = await peticion<{ prestamo: Detalle }>(`/api/prestamos/${guardado.id}`)
+      setDetalle(resultado.prestamo); setPreview(null); setModalAbierto(true)
+      setMensaje('Préstamo y cronograma registrados correctamente en Supabase.')
+      // Mostrar el nuevo préstamo sin filtros anteriores.
+      setPagina(1); setBusquedaAplicada(''); setEstadoAplicado('TODOS')
+      setTextoBusqueda(''); setFiltroEstado('TODOS'); setRecargar(n => n + 1)
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo registrar el préstamo.') }
+    finally { setOcupado(false) }
+  }
+
+  async function verDetalle(id: string) {
+    setErrorLista(''); setOcupado(true)
+    try {
+      const resultado = await peticion<{ prestamo: Detalle }>(`/api/prestamos/${id}`)
+      setDetalle(resultado.prestamo); setModalAbierto(true)
+    } catch (e) { setErrorLista(e instanceof Error ? e.message : 'No se pudo abrir el cronograma.') }
+    finally { setOcupado(false) }
+  }
+
+  function buscarPrestamos(e: FormEvent) {
+    e.preventDefault()
+    setPagina(1)
+    setBusquedaAplicada(textoBusqueda.trim())
+    setEstadoAplicado(filtroEstado)
+    setRecargar(n => n + 1)
+  }
+
+  const inicio = total ? (pagina - 1) * 10 + 1 : 0
+  const fin = Math.min(pagina * 10, total)
+
+  return <div className="clientes-view prestamos-view">
+    <div className="eyebrow">MÓDULO DE PRÉSTAMOS</div>
+    <h1>Registro de préstamos</h1>
+    <p className="muted">Agencia {trabajador.agencia.nombre} · Registro presencial · TEA 30 % · Sistema francés · 30 días entre vencimientos.</p>
+    <div className="clients-grid">
+      <section className="client-card">
+        <h2>Nuevo préstamo</h2>
+        <p className="muted">Primero calcula una vista previa. Solo se guardará cuando confirmes.</p>
+        <form className="document-form" onSubmit={simular}>
+          <label htmlFor="loanClienteBusqueda">Cliente registrado</label>
+          <div className="loan-client-search">
+            <input
+              id="loanClienteBusqueda"
+              type="search"
+              value={textoCliente}
+              onChange={e => escribirBusquedaCliente(e.target.value)}
+              placeholder="DNI/RUC para toda la empresa; nombre para mi agencia"
+              autoComplete="off"
+              maxLength={80}
+              aria-describedby="loanClienteAyuda"
+            />
+            <p id="loanClienteAyuda" className="loan-client-hint">Busca en todos los clientes registrados, no solo en los últimos 50.</p>
+            {buscandoCliente && !clienteSeleccionado && <p className="loan-client-feedback" role="status">Buscando en la base de datos...</p>}
+            {errorCliente && <p className="form-error notice" role="alert">{errorCliente}</p>}
+            {!clienteSeleccionado && textoCliente.trim().length >= 2 && !buscandoCliente && !errorCliente && coincidencias.length === 0 &&
+              <p className="loan-client-feedback" role="status">Sin coincidencias. Si es nuevo, regístralo primero en Clientes.</p>}
+            {!clienteSeleccionado && coincidencias.length > 0 && <div className="loan-client-results" aria-label="Clientes encontrados">
+              {coincidencias.map(c => <button className="loan-client-option" type="button" key={c.id} onClick={() => seleccionarCliente(c)}>
+                <strong>{c.apellidos}, {c.nombres}</strong>
+                <small>{c.tipoDocumento === 'DNI' ? 'DNI' : 'RUC 10'} · {c.numeroDocumento}</small>
+              </button>)}
+            </div>}
+            {clienteSeleccionado && <div className="loan-client-selected" role="status">
+              <span><strong>Cliente seleccionado</strong><small>{clienteSeleccionado.apellidos}, {clienteSeleccionado.nombres}</small></span>
+              <button type="button" className="refresh-list" onClick={() => escribirBusquedaCliente('')}>Cambiar</button>
+            </div>}
+            {clienteSeleccionado && documentoOperacion && <>
+              <label htmlFor="loanDocumentoOperacion">Documento utilizado para este préstamo</label>
+              <select id="loanDocumentoOperacion" value={`${documentoOperacion.tipoDocumento}|${documentoOperacion.numeroDocumento}`}
+                onChange={e => {
+                  const doc = documentosDisponibles(clienteSeleccionado).find(d => `${d.tipoDocumento}|${d.numeroDocumento}` === e.target.value)
+                  if (doc) { setDocumentoOperacion(doc); invalidar() }
+                }}>
+                {documentosDisponibles(clienteSeleccionado).map(d => <option key={d.tipoDocumento} value={`${d.tipoDocumento}|${d.numeroDocumento}`}>{rotuloDocumento(d)}</option>)}
+              </select>
+              <p className="loan-client-hint">Se guardará este documento en el préstamo y cronograma. Ambos usan el mismo límite global de S/ 10 000. Si utiliza RUC 10, verifica su estado en SUNAT.</p>
+            </>}
+          </div>
+          <label htmlFor="loanMonto">Capital solicitado (S/)</label>
+          <input id="loanMonto" type="number" min="1" max="10000" step="0.01" value={monto} onChange={e => { setMonto(e.target.value); invalidar() }} required />
+          <label htmlFor="loanPlazo">Plazo (meses, de 1 a 60)</label>
+          <input id="loanPlazo" type="number" min="1" max="60" step="1" value={plazoMeses} onChange={e => { setPlazoMeses(Number(e.target.value)); invalidar() }} required />
+          <label htmlFor="loanFecha">Fecha de préstamo</label>
+          <input id="loanFecha" type="date" value={fechaPrestamo} onChange={e => { setFechaPrestamo(e.target.value); invalidar() }} required />
+          <button className="submit" type="submit" disabled={ocupado || !clienteId || !documentoOperacion}>{ocupado ? 'Procesando...' : 'Calcular cronograma'} <span aria-hidden="true">→</span></button>
+        </form>
+        {preview && <div className="person-result">
+          <span className="status-pill">Vista previa — no registrada</span>
+          <div className="loan-metrics">
+            <div><small>Capital comprometido</small><strong>{moneda(preview.comprometido)}</strong></div>
+            <div><small>Disponible antes de este préstamo</small><strong>{moneda(preview.disponible)}</strong></div>
+            <div><small>Cuota periódica base</small><strong>{moneda(preview.cronograma.cuotaFija)}</strong></div>
+            <div><small>Total a pagar</small><strong>{moneda(preview.cronograma.montoTotal)}</strong></div>
+          </div>
+          <p className="muted">Préstamo solicitado con {rotuloDocumento(preview.documentoOperacion)}. Intereses totales: {moneda(preview.cronograma.interesTotal)}.</p>
+          {preview.cronograma.avisoRedondeo && <p className="identity-warning">{preview.cronograma.avisoRedondeo}</p>}
+          <button type="button" className="submit" onClick={() => void confirmar()} disabled={ocupado}>Confirmar y guardar préstamo ✓</button>
+        </div>}
+        {error && <div className="form-error notice" role="alert">{error}</div>}
+        {mensaje && <div className="success-notice" role="status">{mensaje}</div>}
+      </section>
+      <section className="client-card loan-list-card">
+        <div className="client-card-header"><div><h2>Préstamos registrados</h2><p className="muted">Busca por cliente o documento. Se muestran 10 por página.</p></div><button type="button" className="refresh-list" onClick={() => setRecargar(n => n + 1)} disabled={cargandoLista}>Actualizar</button></div>
+        <form className="loan-search-form" onSubmit={buscarPrestamos}>
+          <label htmlFor="buscarPrestamo">Buscar préstamo</label>
+          <input id="buscarPrestamo" type="search" maxLength={100} placeholder="Nombre, apellido o DNI/RUC" value={textoBusqueda} onChange={e => setTextoBusqueda(e.target.value)} />
+          <label htmlFor="estadoPrestamo">Estado</label>
+          <select id="estadoPrestamo" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value as EstadoFiltro)}>
+            <option value="TODOS">Todos</option><option value="ACTIVO">Activos</option><option value="CANCELADO">Cancelados</option>
+          </select>
+          <button type="submit" className="refresh-list" disabled={cargandoLista}>Buscar</button>
+        </form>
+        {errorLista && <div className="form-error notice" role="alert">{errorLista}</div>}
+        {cargandoLista ? <p className="muted">Cargando préstamos...</p> : prestamos.length ?
+          <div className="client-list">{prestamos.map(p => <div key={p.id} className="client-row loan-row">
+            <div><strong>{p.cliente.apellidos}, {p.cliente.nombres}</strong><small>{p.tipoDocumentoOperacion ?? p.cliente.tipoDocumento} {p.numeroDocumentoOperacion ?? p.cliente.numeroDocumento} · {moneda(p.monto)} · {p.plazoMeses} cuotas</small><small>{p.agencia.nombre} · {p.estado}</small></div>
+            <button type="button" className="refresh-list" disabled={ocupado} onClick={() => void verDetalle(p.id)}>Ver cronograma</button>
+          </div>)}</div> : <p className="empty-list">No se encontraron préstamos con esos filtros.</p>}
+        <div className="loan-pagination" aria-label="Paginación de préstamos">
+          <span>Mostrando {inicio}–{fin} de {total} préstamos</span>
+          <div>
+            <button className="refresh-list" disabled={cargandoLista || pagina === 1} type="button" onClick={() => setPagina(p => p - 1)}>Anterior</button>
+            <span aria-live="polite">Página {pagina} de {totalPaginas}</span>
+            <button className="refresh-list" disabled={cargandoLista || pagina >= totalPaginas} type="button" onClick={() => setPagina(p => p + 1)}>Siguiente</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    {preview && <section ref={previewRef} className="client-card schedule-section" aria-label="Vista previa del cronograma">
+      <div className="client-card-header"><div><h2>Vista previa del cronograma</h2><p className="muted">No se almacenará hasta confirmar el préstamo.</p></div></div>
+      <div className="schedule-scroll"><table className="schedule-table"><thead><tr><th>N.º</th><th>Vencimiento</th><th>Capital</th><th>Interés</th><th>Cuota</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>{preview.cronograma.cuotas.map(f => <tr key={f.numeroCuota}><td>{f.numeroCuota}</td><td>{f.fechaVencimiento.slice(0, 10)}</td><td>{moneda(f.capital)}</td><td>{moneda(f.interes)}</td><td><strong>{moneda(f.montoCuota)}</strong></td><td>{moneda(f.saldoRestante)}</td><td><span className={`cuota-estado estado-${estadoVisible(f).toLowerCase()}`}>{estadoVisible(f)}</span></td></tr>)}</tbody></table></div>
+    </section>}
+    <p className="identity-footnote">Sprint 1: el límite de S/ 10 000 considera íntegro el capital de los préstamos activos. La disminución del saldo con pagos se implementará en Sprint 2. La consulta de datos no equivale a verificación oficial RENIEC.</p>
+    {modalAbierto && detalle && <div className="schedule-modal" onMouseDown={e => { if (e.target === e.currentTarget) setModalAbierto(false) }}>
+      <section className="client-card schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="schedule-title">
+        <div className="client-card-header schedule-modal-header">
+          <div>
+            <span className="eyebrow">CRONOGRAMA REGISTRADO</span>
+            <h2 id="schedule-title">Cronograma de pagos</h2>
+            <p className="muted">{detalle.cliente.apellidos}, {detalle.cliente.nombres} · {detalle.tipoDocumentoOperacion ?? detalle.cliente.tipoDocumento} {detalle.numeroDocumentoOperacion ?? detalle.cliente.numeroDocumento}</p>
+            <p className="muted">Agencia {detalle.agencia.nombre} · Préstamo {detalle.id}</p>
+          </div>
+          <div className="schedule-actions no-print">
+            <button className="refresh-list" type="button" onClick={() => window.print()}>Imprimir</button>
+            <button className="refresh-list" type="button" ref={cerrarRef} onClick={() => setModalAbierto(false)}>Cerrar ✕</button>
+          </div>
+        </div>
+        <div className="schedule-summary">
+          <div><small>Capital</small><strong>{moneda(detalle.monto)}</strong></div>
+          <div><small>Plazo</small><strong>{detalle.plazoMeses} cuotas</strong></div>
+          <div><small>Intereses</small><strong>{moneda(detalle.interesTotal)}</strong></div>
+          <div><small>Total a pagar</small><strong>{moneda(detalle.montoTotal)}</strong></div>
+        </div>
+        <div className="schedule-scroll"><table className="schedule-table"><thead><tr><th>N.º</th><th>Vencimiento</th><th>Capital</th><th>Interés</th><th>Cuota</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>{detalle.cuotas.map(f => <tr key={f.numeroCuota}><td>{f.numeroCuota}</td><td>{f.fechaVencimiento.slice(0, 10)}</td><td>{moneda(f.capital)}</td><td>{moneda(f.interes)}</td><td><strong>{moneda(f.montoCuota)}</strong></td><td>{moneda(f.saldoRestante)}</td><td><span className={`cuota-estado estado-${estadoVisible(f).toLowerCase()}`}>{estadoVisible(f)}</span></td></tr>)}</tbody></table></div>
+        <p className="identity-footnote">TEA 30 % · Sistema francés · Base anual 360 días · Vencimientos cada 30 días. Estados calculados según las fechas y pagos registrados. Los cobros y la mora aún no están habilitados.</p>
+      </section>
+    </div>}
+  </div>
+}
