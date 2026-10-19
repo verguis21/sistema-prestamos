@@ -83,6 +83,7 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
   const [recargar, setRecargar] = useState(0)
   const previewRef = useRef<HTMLElement | null>(null)
   const cerrarRef = useRef<HTMLButtonElement | null>(null)
+  const scrollAnteriorRef = useRef(0)
 
   async function peticion<T>(url: string, options: RequestInit = {}): Promise<T> {
     const limiteMs = options.method === 'POST' ? 30000 : 15000
@@ -184,15 +185,31 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
     if (preview) previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [preview])
 
+  // El cronograma ocupa una vista dentro del módulo, no una ventana modal.
+  // Se desplaza la página principal y se conserva la posición al volver.
   useEffect(() => {
     if (!modalAbierto) return
-    const overflowAnterior = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    cerrarRef.current?.focus()
-    function cerrarConEscape(e: KeyboardEvent) { if (e.key === 'Escape') setModalAbierto(false) }
+    window.scrollTo(0, 0)
+    cerrarRef.current?.focus({ preventScroll: true })
+    function cerrarConEscape(e: KeyboardEvent) {
+      if (e.key === 'Escape') setModalAbierto(false)
+    }
     window.addEventListener('keydown', cerrarConEscape)
-    return () => { document.body.style.overflow = overflowAnterior; window.removeEventListener('keydown', cerrarConEscape) }
+    return () => window.removeEventListener('keydown', cerrarConEscape)
   }, [modalAbierto])
+
+  function mostrarCronograma(prestamo: Detalle) {
+    scrollAnteriorRef.current = window.scrollY
+    setDetalle(prestamo)
+    setModalAbierto(true)
+  }
+
+  function volverAPrestamos() {
+    setModalAbierto(false)
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => window.scrollTo(0, scrollAnteriorRef.current))
+    })
+  }
 
   function invalidar() { setPreview(null); setError(''); setMensaje('') }
   const formulario = { clienteId, monto: monto.trim(), plazoMeses, fechaPrestamo, tipoDocumentoOperacion: documentoOperacion?.tipoDocumento, numeroDocumentoOperacion: documentoOperacion?.numeroDocumento, ...(documentoOperacion?.empresaId ? { empresaId: documentoOperacion.empresaId } : {}) }
@@ -242,8 +259,7 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
 
     try {
       const resultado = await peticion<{ prestamo: Detalle }>(`/api/prestamos/${guardado.id}`)
-      setDetalle(resultado.prestamo)
-      setModalAbierto(true)
+      mostrarCronograma(resultado.prestamo)
     } catch {
       // El préstamo YA está guardado: no mostrar un error falso de guardado.
       setMensaje('Préstamo guardado. No se pudo abrir el cronograma automáticamente; búscalo en el listado con «Ver cronograma».')
@@ -256,7 +272,7 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
     setErrorLista(''); setOcupado(true)
     try {
       const resultado = await peticion<{ prestamo: Detalle }>(`/api/prestamos/${id}`)
-      setDetalle(resultado.prestamo); setModalAbierto(true)
+      mostrarCronograma(resultado.prestamo)
     } catch (e) { setErrorLista(e instanceof Error ? e.message : 'No se pudo abrir el cronograma.') }
     finally { setOcupado(false) }
   }
@@ -271,6 +287,72 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
 
   const inicio = total ? (pagina - 1) * 10 + 1 : 0
   const fin = Math.min(pagina * 10, total)
+
+  // Detalle del cronograma como pantalla completa. No bloqueamos body ni
+  // creamos una segunda barra de desplazamiento para decenas de cuotas.
+  if (modalAbierto && detalle) {
+    return <div className="clientes-view prestamos-view prestamos-detail-view">
+      <article className="schedule-page" aria-label="Cronograma registrado">
+        <div className="schedule-page-toolbar no-print">
+          <button type="button" className="schedule-back" ref={cerrarRef} onClick={volverAPrestamos}>
+            <span aria-hidden="true">←</span> Volver a préstamos
+          </button>
+          <button type="button" className="schedule-print" onClick={() => window.print()}>
+            Imprimir cronograma
+          </button>
+        </div>
+        <header className="schedule-page-heading">
+          <div>
+            <span className="eyebrow">PRÉSTAMO REGISTRADO · {detalle.agencia.nombre}</span>
+            <h1 id="schedule-title">Cronograma de pagos</h1>
+            <p className="schedule-page-person">
+              {detalle.empresa ? `${detalle.empresa.razonSocial} · Representante: ` : ''}
+              {detalle.cliente.apellidos}, {detalle.cliente.nombres}
+            </p>
+            <p className="muted schedule-page-documento">
+              {detalle.tipoDocumentoOperacion ?? detalle.cliente.tipoDocumento} {detalle.numeroDocumentoOperacion ?? detalle.cliente.numeroDocumento}
+            </p>
+          </div>
+          <div className="schedule-page-status">
+            <span className={`cuota-estado estado-${detalle.estadoCalculado.toLowerCase()}`}>
+              {detalle.estadoCalculado === 'MOROSO' ? 'Con cuotas vencidas' : detalle.estadoCalculado}
+            </span>
+            <span>{detalle.cuotasVencidas} cuotas vencidas</span>
+          </div>
+        </header>
+        <div className="schedule-summary schedule-page-summary">
+          <div><small>Capital</small><strong>{moneda(detalle.monto)}</strong></div>
+          <div><small>Plazo</small><strong>{detalle.plazoMeses} cuotas</strong></div>
+          <div><small>Intereses programados</small><strong>{moneda(detalle.interesTotal)}</strong></div>
+          <div><small>Total programado</small><strong>{moneda(detalle.montoTotal)}</strong></div>
+        </div>
+        <section className="schedule-page-content" aria-labelledby="schedule-rows-title">
+          <div className="schedule-page-table-heading">
+            <div>
+              <h2 id="schedule-rows-title">Detalle de cuotas</h2>
+              <p className="muted">{detalle.cuotas.length} cuotas · vencimientos cada 30 días</p>
+            </div>
+            <span className="schedule-page-hint no-print">Desliza hacia abajo para ver las demás cuotas</span>
+          </div>
+          <div className="schedule-scroll schedule-page-table" role="region" aria-label="Tabla de cuotas" tabIndex={0}>
+            <table className="schedule-table">
+              <thead><tr><th>N.º</th><th>Vencimiento</th><th>Capital</th><th>Interés</th><th>Cuota</th><th>Saldo</th><th>Estado</th></tr></thead>
+              <tbody>{detalle.cuotas.map(f => <tr key={f.numeroCuota}>
+                <td>{f.numeroCuota}</td><td>{f.fechaVencimiento.slice(0, 10)}</td>
+                <td>{moneda(f.capital)}</td><td>{moneda(f.interes)}</td>
+                <td><strong>{moneda(f.montoCuota)}</strong></td><td>{moneda(f.saldoRestante)}</td>
+                <td><span className={`cuota-estado estado-${estadoVisible(f).toLowerCase()}`}>{estadoVisible(f)}</span></td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </section>
+        <p className="schedule-note schedule-page-note">TEA 30 % · Sistema francés · Año comercial de 360 días. La mora adicional no está incluida; está pendiente de confirmación.</p>
+        <div className="schedule-page-bottom no-print">
+          <button type="button" className="schedule-back" onClick={volverAPrestamos}>← Volver a préstamos</button>
+        </div>
+      </article>
+    </div>
+  }
 
   return <div className="clientes-view prestamos-view">
     <div className="eyebrow">MÓDULO DE PRÉSTAMOS</div>
@@ -376,29 +458,6 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
       <div className="schedule-scroll"><table className="schedule-table"><thead><tr><th>N.º</th><th>Vencimiento</th><th>Capital</th><th>Interés</th><th>Cuota</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>{preview.cronograma.cuotas.map(f => <tr key={f.numeroCuota}><td>{f.numeroCuota}</td><td>{f.fechaVencimiento.slice(0, 10)}</td><td>{moneda(f.capital)}</td><td>{moneda(f.interes)}</td><td><strong>{moneda(f.montoCuota)}</strong></td><td>{moneda(f.saldoRestante)}</td><td><span className={`cuota-estado estado-${estadoVisible(f).toLowerCase()}`}>{estadoVisible(f)}</span></td></tr>)}</tbody></table></div>
     </section>}
 
-    {modalAbierto && detalle && <div className="schedule-modal" onMouseDown={e => { if (e.target === e.currentTarget) setModalAbierto(false) }}>
-      <section className="client-card schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="schedule-title">
-        <div className="client-card-header schedule-modal-header">
-          <div>
-            <span className="eyebrow">CRONOGRAMA REGISTRADO</span>
-            <h2 id="schedule-title">Cronograma de pagos</h2>
-            <p className="muted">{detalle.empresa ? `${detalle.empresa.razonSocial} · Representante: ` : ''}{detalle.cliente.apellidos}, {detalle.cliente.nombres} · {detalle.tipoDocumentoOperacion ?? detalle.cliente.tipoDocumento} {detalle.numeroDocumentoOperacion ?? detalle.cliente.numeroDocumento}</p>
-            <p className="muted">Agencia {detalle.agencia.nombre} · <span className={`cuota-estado estado-${detalle.estadoCalculado.toLowerCase()}`}>{detalle.estadoCalculado === 'MOROSO' ? 'Con cuotas vencidas' : detalle.estadoCalculado}</span> · {detalle.cuotasVencidas} cuotas vencidas</p>
-          </div>
-          <div className="schedule-actions no-print">
-            <button className="refresh-list" type="button" onClick={() => window.print()}>Imprimir</button>
-            <button className="refresh-list" type="button" ref={cerrarRef} onClick={() => setModalAbierto(false)}>Cerrar ✕</button>
-          </div>
-        </div>
-        <div className="schedule-summary">
-          <div><small>Capital</small><strong>{moneda(detalle.monto)}</strong></div>
-          <div><small>Plazo</small><strong>{detalle.plazoMeses} cuotas</strong></div>
-          <div><small>Intereses</small><strong>{moneda(detalle.interesTotal)}</strong></div>
-          <div><small>Total a pagar</small><strong>{moneda(detalle.montoTotal)}</strong></div>
-        </div>
-        <div className="schedule-scroll"><table className="schedule-table"><thead><tr><th>N.º</th><th>Vencimiento</th><th>Capital</th><th>Interés</th><th>Cuota</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>{detalle.cuotas.map(f => <tr key={f.numeroCuota}><td>{f.numeroCuota}</td><td>{f.fechaVencimiento.slice(0, 10)}</td><td>{moneda(f.capital)}</td><td>{moneda(f.interes)}</td><td><strong>{moneda(f.montoCuota)}</strong></td><td>{moneda(f.saldoRestante)}</td><td><span className={`cuota-estado estado-${estadoVisible(f).toLowerCase()}`}>{estadoVisible(f)}</span></td></tr>)}</tbody></table></div>
-        <p className="schedule-note">TEA 30 % · Sistema francés · Vencimientos cada 30 días. Cuotas vencidas: {detalle.cuotasVencidas}. La mora adicional no está incluida; su cálculo requiere confirmación.</p>
-      </section>
-    </div>}
+
   </div>
 }
