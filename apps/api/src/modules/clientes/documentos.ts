@@ -36,3 +36,12 @@ export function documentoCorrespondeACliente(
   return documentosMismaPersona(registrado.tipoDocumento, registrado.numeroDocumento)
     .includes(presentado.numeroDocumento);
 }
+
+/** Valida la estructura y el dígito verificador de un RUC de persona jurídica. */
+export function validarRuc20(numero: string): boolean {
+  if (!/^20\d{9}$/.test(numero)) return false;
+  const factores = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const base = numero.slice(0, 10);
+  const suma = [...base].reduce((acc, d, i) => acc + Number(d) * factores[i], 0);
+  return `${base}${(11 - suma % 11) % 10}` === numero;
+}

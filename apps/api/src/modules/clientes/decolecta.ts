@@ -1,4 +1,5 @@
 import type { TipoDocumentoCliente } from "./documentos.js";
+import { validarRuc20 } from "./documentos.js";
 
 export class ConsultaIdentidadError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -102,4 +103,27 @@ export async function obtenerDatosCliente(tipo: TipoDocumentoCliente, numero: st
     verificacionOficial: false,
     requiereRevisionPresencial: true,
   };
+}
+
+
+export type DatosEmpresa = {
+  ruc: string;
+  razonSocial: string;
+  estadoRuc: string | null;
+  condicionRuc: string | null;
+  proveedor: 'DECOLECTA_DATOS_PUBLICOS';
+  representacionOficialVerificada: false;
+};
+
+/** Sólo datos de SUNAT de la empresa. No inferimos representantes desde razón social. */
+export async function obtenerDatosEmpresa(ruc: string): Promise<DatosEmpresa> {
+  if (!validarRuc20(ruc)) throw new ConsultaIdentidadError(400, 'RUC 20 incorrecto (11 dígitos y verificador SUNAT).');
+  const registro = await consultar('/v1/sunat/ruc', ruc);
+  const devuelto = campo(registro, 'numero_documento', 'numeroDocumento', 'ruc');
+  if (devuelto && devuelto !== ruc) throw new ConsultaIdentidadError(502, 'El proveedor devolvió otro RUC.');
+  const razonSocial = campo(registro, 'razon_social', 'razonSocial', 'nombre_o_razon_social', 'business_name', 'nombre');
+  if (!razonSocial) throw new ConsultaIdentidadError(502, 'El proveedor no devolvió la razón social de la empresa.');
+  return { ruc, razonSocial, estadoRuc: campo(registro, 'estado') || null,
+    condicionRuc: campo(registro, 'condicion') || null,
+    proveedor: 'DECOLECTA_DATOS_PUBLICOS', representacionOficialVerificada: false };
 }

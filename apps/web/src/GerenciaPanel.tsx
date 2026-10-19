@@ -1,25 +1,36 @@
 import { useEffect, useState } from 'react'
 
+type Estado = { VIGENTE: number; MOROSO: number; EXTRAJUDICIAL: number; LIQUIDADO: number }
+type ClienteEstado = { VIGENTE: number; MOROSO: number; EXTRAJUDICIAL: number; SIN_DEUDA: number; SIN_PRESTAMOS: number }
 type Resumen = {
   fechaCorte: string
-  alcance: 'TODAS_LAS_AGENCIAS'
   clientesUnicos: number
   prestamosRegistrados: number
-  prestamosActivos: number
-  prestamosCancelados: number
   capitalOtorgadoHistorico: string
-  capitalComprometidoSinAmortizar: string
-  interesesProgramadosNoCobrados: string
+  capitalPendienteProgramado: string
+  interesesPendientesProgramados: string
+  importeCuotasVencidas: string
+  capitalEnCuotasVencidas: string
+  capitalPrestamosMorosos: string
+  capitalPrestamosExtrajudiciales: string
+  cuotasVencidas: number
+  prestamosPorEstado: Estado
+  clientesPorEstado: ClienteEstado
   pagosRecibidos: null
-  morosidadConfirmada: null
-  carteraExtrajudicial: null
   beneficioNeto: null
+  reglaExtrajudicial: string
   nota: string
 }
-
 const API = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000').replace(/\/$/, '')
-const formatoSol = (v: string) => new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(Number(v))
-const formatoEntero = (v: number) => new Intl.NumberFormat('es-PE').format(v)
+const dinero = (v: string) => new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(Number(v))
+const entero = (v: number) => new Intl.NumberFormat('es-PE').format(v)
+
+type MetricaProps = { etiqueta: string; cifra: string; aclaracion: string; tono?: 'normal' | 'alerta' | 'critico'; principal?: boolean }
+function Metrica({ etiqueta, cifra, aclaracion, tono = 'normal', principal = false }: MetricaProps) {
+  return <article className={`gerencia-stat tone-${tono}${principal ? ' metric-primary' : ''}`}>
+    <span>{etiqueta}</span><strong>{cifra}</strong><small>{aclaracion}</small>
+  </article>
+}
 
 export default function GerenciaPanel({ token }: { token: string }) {
   const [resumen, setResumen] = useState<Resumen | null>(null)
@@ -29,62 +40,68 @@ export default function GerenciaPanel({ token }: { token: string }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15000)
+    const timeout = setTimeout(() => controller.abort(), 25000)
     async function cargar() {
-      setCargando(true)
-      setError('')
+      setCargando(true); setError('')
       try {
         const response = await fetch(`${API}/api/gerencia/resumen`, {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: 'no-store',
-          signal: controller.signal,
+          headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal,
         })
         const json = await response.json()
-        if (!response.ok) throw new Error(json.message ?? 'No fue posible cargar el resumen general.')
+        if (!response.ok) throw new Error(json.message ?? 'No se pudo consultar la cartera.')
         setResumen(json as Resumen)
       } catch (e) {
         if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Error de conexión.')
-        else setError('El servidor tardó más de 15 segundos. Revisa la conexión y actualiza.')
-      } finally {
-        clearTimeout(timeout)
-        setCargando(false)
-      }
+        else setError('La consulta tardó demasiado. Comprueba que Render esté activo y vuelve a actualizar.')
+      } finally { clearTimeout(timeout); setCargando(false) }
     }
     void cargar()
     return () => { clearTimeout(timeout); controller.abort() }
   }, [token, recargar])
 
   return <section className="gerencia-view">
-    <div className="eyebrow">GERENCIA · VISTA GENERAL</div>
     <div className="gerencia-heading">
       <div>
-        <h1>Resumen del negocio</h1>
-        <p className="muted">Consolidado de las cinco agencias. Por ahora sin filtros por sucursal.</p>
+        <span className="eyebrow">GERENCIA GENERAL / TODAS LAS AGENCIAS</span>
+        <h1>Estado de la cartera</h1>
+        <p className="muted page-lead">Capital otorgado, deuda pendiente y cartera en riesgo.</p>
       </div>
-      <button className="refresh-list" type="button" disabled={cargando} onClick={() => setRecargar(v => v + 1)}>{cargando ? 'Actualizando…' : 'Actualizar'}</button>
+      <button type="button" className="refresh-list" disabled={cargando} onClick={() => setRecargar(v => v + 1)}>{cargando ? 'Consultando…' : '↻ Actualizar cifras'}</button>
     </div>
     {error && <div className="form-error" role="alert">{error}</div>}
-    {!resumen && cargando && <p className="muted">Consultando cifras de la empresa…</p>}
+    {!resumen && cargando && <div className="gerencia-loading" role="status">Obteniendo información consolidada…</div>}
     {resumen && <>
-      <p className="gerencia-cutoff">Información registrada hasta {new Date(resumen.fechaCorte).toLocaleString('es-PE')}</p>
-      <div className="gerencia-grid">
-        <article className="gerencia-stat"><span>Capital total otorgado</span><strong>{formatoSol(resumen.capitalOtorgadoHistorico)}</strong><small>Acumulado histórico de préstamos</small></article>
-        <article className="gerencia-stat"><span>Préstamos registrados</span><strong>{formatoEntero(resumen.prestamosRegistrados)}</strong><small>{formatoEntero(resumen.prestamosActivos)} activos · {formatoEntero(resumen.prestamosCancelados)} cancelados en base de datos</small></article>
-        <article className="gerencia-stat"><span>Clientes únicos</span><strong>{formatoEntero(resumen.clientesUnicos)}</strong><small>Una ficha por persona natural en el modelo actual</small></article>
-        <article className="gerencia-stat"><span>Capital comprometido</span><strong>{formatoSol(resumen.capitalComprometidoSinAmortizar)}</strong><small>Capital inicial de préstamos activos; no es saldo real actualizado</small></article>
-        <article className="gerencia-stat"><span>Intereses programados</span><strong>{formatoSol(resumen.interesesProgramadosNoCobrados)}</strong><small>Proyección contractual, no ingresos recibidos</small></article>
+      <p className="gerencia-cutoff">Corte: {new Date(resumen.fechaCorte).toLocaleString('es-PE')} · Datos internos registrados</p>
+      <div className="gerencia-grid financial-grid">
+        <Metrica principal etiqueta="Capital total colocado" cifra={dinero(resumen.capitalOtorgadoHistorico)} aclaracion="Suma histórica de préstamos otorgados" />
+        <Metrica principal etiqueta="Capital pendiente de recuperar" cifra={dinero(resumen.capitalPendienteProgramado)} aclaracion="Capital de cuotas aún no pagadas" />
+        <Metrica principal tono="alerta" etiqueta="Cuotas vencidas por cobrar" cifra={dinero(resumen.importeCuotasVencidas)} aclaracion={`${entero(resumen.cuotasVencidas)} cuotas vencidas · capital e intereses`} />
+        <Metrica principal tono="critico" etiqueta="Capital en extrajudicial" cifra={dinero(resumen.capitalPrestamosExtrajudiciales)} aclaracion="Capital pendiente vinculado a cartera extrajudicial" />
+        <Metrica etiqueta="Capital con atraso" cifra={dinero(resumen.capitalPrestamosMorosos)} aclaracion="Capital pendiente de créditos con cuotas vencidas" tono="alerta" />
+        <Metrica etiqueta="Préstamos activos" cifra={entero(resumen.prestamosPorEstado.VIGENTE + resumen.prestamosPorEstado.MOROSO + resumen.prestamosPorEstado.EXTRAJUDICIAL)} aclaracion={`${entero(resumen.prestamosRegistrados)} registrados en total`} />
+        <Metrica etiqueta="Clientes morosos" cifra={entero(resumen.clientesPorEstado.MOROSO)} aclaracion="Con cuotas vencidas sin pagar" tono="alerta" />
+        <Metrica etiqueta="Clientes en extrajudicial" cifra={entero(resumen.clientesPorEstado.EXTRAJUDICIAL)} aclaracion="Según regla provisional de 360 días" tono="critico" />
       </div>
-      <section className="gerencia-pending">
-        <h2>Indicadores por habilitar</h2>
-        <p className="muted">No mostraremos montos inventados ni convertiremos una cuota no registrada como pagada en una pérdida contable.</p>
-        <div className="gerencia-pending-grid">
-          <div><span>Pagos efectivamente recibidos</span><strong>Sin datos de cobros</strong></div>
-          <div><span>Morosidad confirmada</span><strong>Pendiente de pagos</strong></div>
-          <div><span>Cartera extrajudicial</span><strong>Regla por confirmar</strong></div>
-          <div><span>Beneficio o pérdida neta</span><strong>Pendiente de ingresos y gastos</strong></div>
-        </div>
-      </section>
-      <p className="identity-footnote">{resumen.nota} Los préstamos mostrados son registros del sistema; no equivalen necesariamente a desembolsos bancarios comprobados.</p>
+      <div className="gerencia-bottom-grid">
+        <section className="gerencia-pending">
+          <h2>Situación de la cartera</h2>
+          <p className="muted">Préstamos clasificados según el vencimiento de sus cuotas.</p>
+          <div className="portfolio-rows">
+            <div><span className="portfolio-label"><span className="state-dot ok"/>Al día</span><strong>{entero(resumen.prestamosPorEstado.VIGENTE)}</strong></div>
+            <div><span className="portfolio-label"><span className="state-dot warning"/>Con cuotas vencidas</span><strong>{entero(resumen.prestamosPorEstado.MOROSO)}</strong></div>
+            <div><span className="portfolio-label"><span className="state-dot danger"/>Extrajudiciales</span><strong>{entero(resumen.prestamosPorEstado.EXTRAJUDICIAL)}</strong></div>
+            <div><span className="portfolio-label"><span className="state-dot neutral"/>Liquidados</span><strong>{entero(resumen.prestamosPorEstado.LIQUIDADO)}</strong></div>
+          </div>
+        </section>
+        <section className="gerencia-pending">
+          <h2>Proyección y cobranza</h2>
+          <div className="finance-detail"><span>Intereses pendientes programados</span><strong>{dinero(resumen.interesesPendientesProgramados)}</strong></div>
+          <div className="finance-detail"><span>Capital en cuotas vencidas</span><strong>{dinero(resumen.capitalEnCuotasVencidas)}</strong></div>
+          <div className="finance-detail"><span>Ingresos realmente cobrados</span><strong className="unavailable">Por habilitar</strong></div>
+          <p className="muted metric-footnote">Los intereses programados no representan ganancias cobradas. La utilidad real se mostrará cuando exista registro de pagos e ingresos/gastos.</p>
+        </section>
+      </div>
+      <p className="gerencia-disclaimer">{resumen.nota} El criterio extrajudicial sigue pendiente de validación del profesor.</p>
     </>}
   </section>
 }

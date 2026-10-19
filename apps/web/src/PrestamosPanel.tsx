@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 type Trabajador = { agencia: { nombre: string } }
-type TipoDocumento = 'DNI' | 'RUC10'
-type DocumentoOperacion = { tipoDocumento: TipoDocumento; numeroDocumento: string }
-type Cliente = { id: string; nombres: string; apellidos: string; numeroDocumento: string; tipoDocumento: TipoDocumento; documentoOperacion?: DocumentoOperacion }
-type Fila = { numeroCuota: number; fechaVencimiento: string; capital: string; interes: string; montoCuota: string; saldoRestante: string; estado?: 'PENDIENTE' | 'PAGADA' }
+type TipoDocumento = 'DNI' | 'RUC10' | 'RUC20'
+type DocumentoOperacion = { tipoDocumento: TipoDocumento; numeroDocumento: string; empresaId?: string }
+type Cliente = { id: string; nombres: string; apellidos: string; numeroDocumento: string; tipoDocumento: 'DNI' | 'RUC10'; documentoOperacion?: DocumentoOperacion; empresaOperacion?: { id: string; ruc: string; razonSocial: string } }
+type Fila = { numeroCuota: number; fechaVencimiento: string; capital: string; interes: string; montoCuota: string; saldoRestante: string; estado?: 'PENDIENTE' | 'PAGADA'; estadoVisible?: 'PENDIENTE' | 'VENCIDA' | 'PAGADA' }
 type Cronograma = { cuotaFija: string; montoTotal: string; interesTotal: string; tasaPeriodoPorcentaje: number; avisoRedondeo: string | null; cuotas: Fila[] }
 type Preview = { comprometido: string; disponible: string; cronograma: Cronograma; documentoOperacion: DocumentoOperacion }
-type PrestamoLista = { id: string; fechaPrestamo: string; monto: string; plazoMeses: number; cuotaFija: string; estado: string; tipoDocumentoOperacion: TipoDocumento | null; numeroDocumentoOperacion: string | null; cliente: { nombres: string; apellidos: string; numeroDocumento: string; tipoDocumento: TipoDocumento }; agencia: { nombre: string } }
-type Detalle = { id: string; tipoDocumentoOperacion: TipoDocumento | null; numeroDocumentoOperacion: string | null; monto: string; fechaPrestamo: string; plazoMeses: number; cuotaFija: string; interesTotal: string; montoTotal: string; baseDias: number; diasPeriodo: number; cliente: Cliente; agencia: { nombre: string }; cuotas: Fila[] }
-type EstadoFiltro = 'TODOS' | 'ACTIVO' | 'CANCELADO'
+type EstadoPrestamoVisible = 'VIGENTE' | 'MOROSO' | 'EXTRAJUDICIAL' | 'LIQUIDADO'
+type PrestamoLista = { estadoCalculado: EstadoPrestamoVisible; diasMora: number; cuotasVencidas: number; id: string; fechaPrestamo: string; monto: string; plazoMeses: number; cuotaFija: string; estado: string; tipoDocumentoOperacion: TipoDocumento | null; numeroDocumentoOperacion: string | null; cliente: { nombres: string; apellidos: string; numeroDocumento: string; tipoDocumento: TipoDocumento }; empresa?: { razonSocial: string; ruc: string } | null; agencia: { nombre: string } }
+type Detalle = { estadoCalculado: EstadoPrestamoVisible; diasMora: number; cuotasVencidas: number; importeCuotasVencidasCentimos: number; id: string; tipoDocumentoOperacion: TipoDocumento | null; numeroDocumentoOperacion: string | null; monto: string; fechaPrestamo: string; plazoMeses: number; cuotaFija: string; interesTotal: string; montoTotal: string; baseDias: number; diasPeriodo: number; cliente: Cliente; empresa?: { razonSocial: string; ruc: string } | null; agencia: { nombre: string }; cuotas: Fila[] }
+type EstadoFiltro = 'TODOS' | EstadoPrestamoVisible
 type PaginaPrestamos = { prestamos: PrestamoLista[]; total: number; pagina: number; porPagina: number; totalPaginas: number }
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000').replace(/\/$/, '')
@@ -26,13 +27,14 @@ function documentosDisponibles(cliente: Cliente): DocumentoOperacion[] {
   return [
     { tipoDocumento: 'DNI', numeroDocumento: dni },
     { tipoDocumento: 'RUC10', numeroDocumento: generarRuc10(dni) },
+    ...(cliente.empresaOperacion ? [{ tipoDocumento: 'RUC20' as const, numeroDocumento: cliente.empresaOperacion.ruc, empresaId: cliente.empresaOperacion.id }] : []),
   ]
 }
 function elegirDocumento(cliente: Cliente, consultado: string): DocumentoOperacion {
   return documentosDisponibles(cliente).find(d => d.numeroDocumento === consultado.trim())
     ?? { tipoDocumento: cliente.tipoDocumento, numeroDocumento: cliente.numeroDocumento }
 }
-const rotuloDocumento = (d: DocumentoOperacion) => `${d.tipoDocumento === 'RUC10' ? 'RUC 10' : 'DNI'} ${d.numeroDocumento}`
+const rotuloDocumento = (d: DocumentoOperacion) => `${d.tipoDocumento === 'RUC10' ? 'RUC 10' : d.tipoDocumento === 'RUC20' ? 'RUC 20' : 'DNI'} ${d.numeroDocumento}`
 // El cliente conserva su documento principal, pero el resultado de búsqueda
 // debe mostrar claramente el DNI/RUC que el asesor escribió para esta operación.
 function rotuloHallazgo(cliente: Cliente, busqueda: string): string {
@@ -45,7 +47,8 @@ function rotuloHallazgo(cliente: Cliente, busqueda: string): string {
 // Los estados de esta pantalla se derivan de las fechas y de pagos REGISTRADOS.
 // No crea pagos ni aplica mora; es una lectura del cronograma actual.
 function estadoVisible(cuota: Fila): 'Pagada' | 'Vencida' | 'Pendiente' {
-  if (cuota.estado === 'PAGADA') return 'Pagada'
+  if (cuota.estadoVisible === 'PAGADA' || cuota.estado === 'PAGADA') return 'Pagada'
+  if (cuota.estadoVisible === 'VENCIDA') return 'Vencida'
   return cuota.fechaVencimiento.slice(0, 10) < hoy ? 'Vencida' : 'Pendiente'
 }
 
@@ -192,7 +195,7 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
   }, [modalAbierto])
 
   function invalidar() { setPreview(null); setError(''); setMensaje('') }
-  const formulario = { clienteId, monto: monto.trim(), plazoMeses, fechaPrestamo, tipoDocumentoOperacion: documentoOperacion?.tipoDocumento, numeroDocumentoOperacion: documentoOperacion?.numeroDocumento }
+  const formulario = { clienteId, monto: monto.trim(), plazoMeses, fechaPrestamo, tipoDocumentoOperacion: documentoOperacion?.tipoDocumento, numeroDocumentoOperacion: documentoOperacion?.numeroDocumento, ...(documentoOperacion?.empresaId ? { empresaId: documentoOperacion.empresaId } : {}) }
 
   async function simular(e: FormEvent) {
     e.preventDefault(); setOcupado(true); setError(''); setMensaje(''); setPreview(null)
@@ -271,12 +274,12 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
 
   return <div className="clientes-view prestamos-view">
     <div className="eyebrow">MÓDULO DE PRÉSTAMOS</div>
-    <h1>Registro de préstamos</h1>
-    <p className="muted">Agencia {trabajador.agencia.nombre} · Registro presencial · TEA 30 % · Sistema francés · 30 días entre vencimientos.</p>
+    <h1>Gestión de préstamos</h1>
+    <p className="muted">Registra créditos y consulta cronogramas de {trabajador.agencia.nombre}.</p>
     <div className="clients-grid">
       <section className="client-card">
         <h2>Nuevo préstamo</h2>
-        <p className="muted">Primero calcula una vista previa. Solo se guardará cuando confirmes.</p>
+        <p className="muted">Revisa condiciones y cuotas antes de guardar.</p>
         <form className="document-form" onSubmit={simular}>
           <label htmlFor="loanClienteBusqueda">Cliente registrado</label>
           <div className="loan-client-search">
@@ -285,12 +288,12 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
               type="search"
               value={textoCliente}
               onChange={e => escribirBusquedaCliente(e.target.value)}
-              placeholder="DNI/RUC para toda la empresa; nombre para mi agencia"
+              placeholder="DNI, RUC 10 o RUC 20"
               autoComplete="off"
               maxLength={80}
               aria-describedby="loanClienteAyuda"
             />
-            <p id="loanClienteAyuda" className="loan-client-hint">DNI o RUC completo: búsqueda global. Nombre: clientes atendidos en tu agencia.</p>
+            <p id="loanClienteAyuda" className="loan-client-hint">Documento completo: búsqueda global. Nombre: clientes de tu agencia.</p>
             {buscandoCliente && !clienteSeleccionado && <p className="loan-client-feedback" role="status">Buscando en la base de datos...</p>}
             {errorCliente && <p className="form-error notice" role="alert">{errorCliente}</p>}
             {!clienteSeleccionado && textoCliente.trim().length >= 2 && !buscandoCliente && !errorCliente && coincidencias.length === 0 &&
@@ -314,7 +317,8 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
                 }}>
                 {documentosDisponibles(clienteSeleccionado).map(d => <option key={d.tipoDocumento} value={`${d.tipoDocumento}|${d.numeroDocumento}`}>{rotuloDocumento(d)}</option>)}
               </select>
-              <p className="loan-client-hint">Se guardará este documento en el préstamo y cronograma. Ambos usan el mismo límite global de S/ 10 000. Si utiliza RUC 10, verifica su estado en SUNAT.</p>
+              {clienteSeleccionado.empresaOperacion && <p className="empresa-context">Empresa: <strong>{clienteSeleccionado.empresaOperacion.razonSocial}</strong> · RUC {clienteSeleccionado.empresaOperacion.ruc}</p>}
+              <p className="loan-client-hint">Límite global S/ 10 000 por representante o persona natural. Si usa RUC 20, la empresa queda asociada a la operación.</p>
             </>}
           </div>
           <label htmlFor="loanMonto">Capital solicitado (S/)</label>
@@ -341,20 +345,20 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
         {mensaje && <div className="success-notice" role="status">{mensaje}</div>}
       </section>
       <section className="client-card loan-list-card">
-        <div className="client-card-header"><div><h2>Préstamos registrados</h2><p className="muted">Busca por cliente o documento. Se muestran 10 por página.</p></div><button type="button" className="refresh-list" onClick={() => setRecargar(n => n + 1)} disabled={cargandoLista}>Actualizar</button></div>
+        <div className="client-card-header"><div><h2>Préstamos registrados</h2><p className="muted">Busca y revisa el estado de los préstamos de esta agencia.</p></div><button type="button" className="refresh-list" onClick={() => setRecargar(n => n + 1)} disabled={cargandoLista}>Actualizar</button></div>
         <form className="loan-search-form" onSubmit={buscarPrestamos}>
           <label htmlFor="buscarPrestamo">Buscar préstamo</label>
           <input id="buscarPrestamo" type="search" maxLength={100} placeholder="Nombre, apellido o DNI/RUC" value={textoBusqueda} onChange={e => setTextoBusqueda(e.target.value)} />
           <label htmlFor="estadoPrestamo">Estado</label>
           <select id="estadoPrestamo" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value as EstadoFiltro)}>
-            <option value="TODOS">Todos</option><option value="ACTIVO">Activos</option><option value="CANCELADO">Cancelados</option>
+            <option value="TODOS">Todos</option><option value="VIGENTE">Vigentes</option><option value="MOROSO">Con atraso</option><option value="EXTRAJUDICIAL">Extrajudiciales</option><option value="LIQUIDADO">Liquidados</option>
           </select>
           <button type="submit" className="refresh-list" disabled={cargandoLista}>Buscar</button>
         </form>
         {errorLista && <div className="form-error notice" role="alert">{errorLista}</div>}
         {cargandoLista ? <p className="muted">Cargando préstamos...</p> : prestamos.length ?
           <div className="client-list">{prestamos.map(p => <div key={p.id} className="client-row loan-row">
-            <div><strong>{p.cliente.apellidos}, {p.cliente.nombres}</strong><small>{p.tipoDocumentoOperacion ?? p.cliente.tipoDocumento} {p.numeroDocumentoOperacion ?? p.cliente.numeroDocumento} · {moneda(p.monto)} · {p.plazoMeses} cuotas</small><small>{p.agencia.nombre} · {p.estado}</small></div>
+            <div><strong>{p.empresa ? `${p.empresa.razonSocial} · ` : ''}{p.cliente.apellidos}, {p.cliente.nombres}</strong><small>{p.tipoDocumentoOperacion ?? p.cliente.tipoDocumento} {p.numeroDocumentoOperacion ?? p.cliente.numeroDocumento} · {moneda(p.monto)} · {p.plazoMeses} cuotas</small><small>{p.agencia.nombre} · <span className={`cuota-estado estado-${p.estadoCalculado.toLowerCase()}`}>{({VIGENTE:'Al día',MOROSO:'Con cuotas vencidas',EXTRAJUDICIAL:'Extrajudicial',LIQUIDADO:'Liquidado'} as const)[p.estadoCalculado]}</span>{p.cuotasVencidas > 0 ? ` · ${p.cuotasVencidas} cuotas vencidas` : ''}</small></div>
             <button type="button" className="refresh-list" disabled={ocupado} onClick={() => void verDetalle(p.id)}>Ver cronograma</button>
           </div>)}</div> : <p className="empty-list">No se encontraron préstamos con esos filtros.</p>}
         <div className="loan-pagination" aria-label="Paginación de préstamos">
@@ -371,15 +375,15 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
       <div className="client-card-header"><div><h2>Vista previa del cronograma</h2><p className="muted">No se almacenará hasta confirmar el préstamo.</p></div></div>
       <div className="schedule-scroll"><table className="schedule-table"><thead><tr><th>N.º</th><th>Vencimiento</th><th>Capital</th><th>Interés</th><th>Cuota</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>{preview.cronograma.cuotas.map(f => <tr key={f.numeroCuota}><td>{f.numeroCuota}</td><td>{f.fechaVencimiento.slice(0, 10)}</td><td>{moneda(f.capital)}</td><td>{moneda(f.interes)}</td><td><strong>{moneda(f.montoCuota)}</strong></td><td>{moneda(f.saldoRestante)}</td><td><span className={`cuota-estado estado-${estadoVisible(f).toLowerCase()}`}>{estadoVisible(f)}</span></td></tr>)}</tbody></table></div>
     </section>}
-    <p className="identity-footnote">Sprint 1: el límite de S/ 10 000 considera íntegro el capital de los préstamos activos. La disminución del saldo con pagos se implementará en Sprint 2. La consulta de datos no equivale a verificación oficial RENIEC.</p>
+
     {modalAbierto && detalle && <div className="schedule-modal" onMouseDown={e => { if (e.target === e.currentTarget) setModalAbierto(false) }}>
       <section className="client-card schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="schedule-title">
         <div className="client-card-header schedule-modal-header">
           <div>
             <span className="eyebrow">CRONOGRAMA REGISTRADO</span>
             <h2 id="schedule-title">Cronograma de pagos</h2>
-            <p className="muted">{detalle.cliente.apellidos}, {detalle.cliente.nombres} · {detalle.tipoDocumentoOperacion ?? detalle.cliente.tipoDocumento} {detalle.numeroDocumentoOperacion ?? detalle.cliente.numeroDocumento}</p>
-            <p className="muted">Agencia {detalle.agencia.nombre} · Préstamo {detalle.id}</p>
+            <p className="muted">{detalle.empresa ? `${detalle.empresa.razonSocial} · Representante: ` : ''}{detalle.cliente.apellidos}, {detalle.cliente.nombres} · {detalle.tipoDocumentoOperacion ?? detalle.cliente.tipoDocumento} {detalle.numeroDocumentoOperacion ?? detalle.cliente.numeroDocumento}</p>
+            <p className="muted">Agencia {detalle.agencia.nombre} · <span className={`cuota-estado estado-${detalle.estadoCalculado.toLowerCase()}`}>{detalle.estadoCalculado === 'MOROSO' ? 'Con cuotas vencidas' : detalle.estadoCalculado}</span> · {detalle.cuotasVencidas} cuotas vencidas</p>
           </div>
           <div className="schedule-actions no-print">
             <button className="refresh-list" type="button" onClick={() => window.print()}>Imprimir</button>
@@ -393,7 +397,7 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
           <div><small>Total a pagar</small><strong>{moneda(detalle.montoTotal)}</strong></div>
         </div>
         <div className="schedule-scroll"><table className="schedule-table"><thead><tr><th>N.º</th><th>Vencimiento</th><th>Capital</th><th>Interés</th><th>Cuota</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>{detalle.cuotas.map(f => <tr key={f.numeroCuota}><td>{f.numeroCuota}</td><td>{f.fechaVencimiento.slice(0, 10)}</td><td>{moneda(f.capital)}</td><td>{moneda(f.interes)}</td><td><strong>{moneda(f.montoCuota)}</strong></td><td>{moneda(f.saldoRestante)}</td><td><span className={`cuota-estado estado-${estadoVisible(f).toLowerCase()}`}>{estadoVisible(f)}</span></td></tr>)}</tbody></table></div>
-        <p className="identity-footnote">TEA 30 % · Sistema francés · Base anual 360 días · Vencimientos cada 30 días. Estados calculados según las fechas y pagos registrados. Los cobros y la mora aún no están habilitados.</p>
+        <p className="schedule-note">TEA 30 % · Sistema francés · Vencimientos cada 30 días. Cuotas vencidas: {detalle.cuotasVencidas}. La mora adicional no está incluida; su cálculo requiere confirmación.</p>
       </section>
     </div>}
   </div>

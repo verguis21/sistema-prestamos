@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { documentoCorrespondeACliente } from '../clientes/documentos.js';
+import { evaluarPrestamo, estadoDeCuota, fechaPeru } from './estados.js';
 import { z } from 'zod';
 import type { Prisma } from '../../../generated/prisma/client.js';
 import { prisma } from '../../lib/prisma.js';
@@ -15,8 +16,9 @@ const solicitud = z.object({
   monto: z.string().trim(),
   plazoMeses: z.number().int().min(1).max(60),
   fechaPrestamo: z.string(),
-  tipoDocumentoOperacion: z.enum(['DNI', 'RUC10']),
+  tipoDocumentoOperacion: z.enum(['DNI', 'RUC10', 'RUC20']),
   numeroDocumentoOperacion: z.string().trim().min(8).max(11),
+  empresaId: z.string().uuid().optional(),
 }).strict();
 
 class ReglaNegocioError extends Error {
@@ -54,11 +56,26 @@ async function comprobarCliente(clienteId: string, cliente: Pick<typeof prisma, 
   return existente;
 }
 
-function validarDocumentoDelPrestamo(
-  cliente: { tipoDocumento: 'DNI' | 'RUC10'; numeroDocumento: string },
-  datos: { tipoDocumentoOperacion: 'DNI' | 'RUC10'; numeroDocumentoOperacion: string },
+async function validarDocumentoDelPrestamo(
+  cliente: { id: string; tipoDocumento: 'DNI' | 'RUC10' | 'RUC20'; numeroDocumento: string },
+  datos: { tipoDocumentoOperacion: 'DNI' | 'RUC10' | 'RUC20'; numeroDocumentoOperacion: string; empresaId?: string },
+  db: Pick<typeof prisma, 'empresa'>,
 ) {
-  if (!documentoCorrespondeACliente(cliente, {
+  if (cliente.tipoDocumento === 'RUC20') throw new ReglaNegocioError(400, 'La ficha principal del deudor debe ser de persona natural.');
+  if (datos.tipoDocumentoOperacion === 'RUC20') {
+    if (!datos.empresaId || !/^20\d{9}$/.test(datos.numeroDocumentoOperacion)) {
+      throw new ReglaNegocioError(400, 'Selecciona una empresa RUC 20 registrada con representante legal.');
+    }
+    const empresa = await db.empresa.findUnique({ where: { id: datos.empresaId }, select: {
+      ruc: true, representanteId: true, representacionRevisadaEn: true,
+    } });
+    if (!empresa || empresa.ruc !== datos.numeroDocumentoOperacion || empresa.representanteId !== cliente.id || !empresa.representacionRevisadaEn) {
+      throw new ReglaNegocioError(400, 'La empresa no está vinculada al representante seleccionado. Revisa los datos de RUC 20.');
+    }
+    return;
+  }
+  if (datos.empresaId) throw new ReglaNegocioError(400, 'Una operación personal no debe asociar una empresa.');
+  if (!documentoCorrespondeACliente({ tipoDocumento: cliente.tipoDocumento, numeroDocumento: cliente.numeroDocumento }, {
     tipoDocumento: datos.tipoDocumentoOperacion,
     numeroDocumento: datos.numeroDocumentoOperacion,
   })) {
@@ -75,7 +92,7 @@ router.post('/simular', async (req, res, next) => {
   try {
     const datos = interpretar(req.body);
     const cliente = await comprobarCliente(datos.clienteId, prisma);
-    validarDocumentoDelPrestamo(cliente, datos);
+    await validarDocumentoDelPrestamo(cliente, datos, prisma);
     const comprometido = await capitalComprometido(datos.clienteId, prisma);
     const disponible = Math.max(0, LIMITE_CENTIMOS - comprometido);
     if (datos.montoCentimos > disponible) {
@@ -99,7 +116,7 @@ router.post('/', async (req, res, next) => {
       });
       if (!cliente?.proveedorIdentidad) throw new ReglaNegocioError(400, 'Cliente no registrado o sin datos del proveedor.');
       // Se valida otra vez al GUARDAR. Nunca confiar solo en la vista previa del navegador.
-      validarDocumentoDelPrestamo(cliente, datos);
+      await validarDocumentoDelPrestamo(cliente, datos, tx);
       const { _sum } = await tx.prestamo.aggregate({
         where: { clienteId: datos.clienteId, estado: 'ACTIVO' }, _sum: { monto: true },
       });
@@ -112,6 +129,7 @@ router.post('/', async (req, res, next) => {
           clienteId: datos.clienteId,
           agenciaId: trabajador.agencia.id,
           trabajadorId: trabajador.id,
+          empresaId: datos.tipoDocumentoOperacion === 'RUC20' ? datos.empresaId : null,
           monto: dinero(datos.montoCentimos),
           plazoMeses: datos.plazoMeses,
           fechaPrestamo: datos.fecha,
@@ -147,7 +165,7 @@ router.post('/', async (req, res, next) => {
 const filtrosListado = z.object({
   pagina: z.coerce.number().int().min(1).max(100000).default(1),
   buscar: z.string().trim().max(100).default(''),
-  estado: z.enum(['TODOS', 'ACTIVO', 'CANCELADO']).default('TODOS'),
+  estado: z.enum(['TODOS', 'VIGENTE', 'MOROSO', 'EXTRAJUDICIAL', 'LIQUIDADO']).default('TODOS'),
 });
 
 router.get('/', async (req, res, next) => {
@@ -160,7 +178,7 @@ router.get('/', async (req, res, next) => {
     const { pagina, buscar, estado } = parsed.data;
     const trabajador = res.locals.trabajador as { agencia: { id: string } };
     const donde: Prisma.PrestamoWhereInput = { agenciaId: trabajador.agencia.id };
-    if (estado !== 'TODOS') donde.estado = estado;
+    // El estado visible se calcula con las cuotas, no se persiste un texto que pueda quedarse obsoleto.
 
     // Cada palabra puede coincidir en nombres, apellidos o documento.
     // No permite ver préstamos de otras agencias: siempre se exige agenciaId.
@@ -172,27 +190,33 @@ router.get('/', async (req, res, next) => {
           { cliente: { is: { apellidos: { contains: palabra, mode: 'insensitive' } } } },
           { cliente: { is: { numeroDocumento: { contains: palabra } } } },
           { numeroDocumentoOperacion: { contains: palabra } },
+          { empresa: { is: { razonSocial: { contains: palabra, mode: 'insensitive' } } } },
         ],
       }));
     }
 
     const porPagina = 10;
-    const [total, prestamos] = await prisma.$transaction([
-      prisma.prestamo.count({ where: donde }),
-      prisma.prestamo.findMany({
+    const todosLosPrestamos = await prisma.prestamo.findMany({
         where: donde,
         orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
-        skip: (pagina - 1) * porPagina,
-        take: porPagina,
         select: {
           id: true, fechaPrestamo: true, monto: true, plazoMeses: true,
           cuotaFija: true, montoTotal: true, estado: true,
           tipoDocumentoOperacion: true, numeroDocumentoOperacion: true,
           cliente: { select: { nombres: true, apellidos: true, numeroDocumento: true, tipoDocumento: true } },
+          empresa: { select: { razonSocial: true, ruc: true } },
           agencia: { select: { nombre: true } },
+          cuotas: { select: { estado: true, fechaVencimiento: true, montoCuota: true, capital: true } },
         },
-      }),
-    ]);
+      });
+    const hoy = fechaPeru();
+    const evaluados = todosLosPrestamos.map(({ cuotas, ...datos }) => ({
+      ...datos,
+      ...evaluarPrestamo({ ...datos, cuotas }, hoy),
+    }));
+    const filtrados = estado === 'TODOS' ? evaluados : evaluados.filter(p => p.estadoCalculado === estado);
+    const total = filtrados.length;
+    const prestamos = filtrados.slice((pagina - 1) * porPagina, pagina * porPagina);
     res.setHeader('Cache-Control', 'no-store');
     res.json({ prestamos, total, pagina, porPagina, totalPaginas: Math.max(1, Math.ceil(total / porPagina)) });
   } catch (e) { next(e); }
@@ -209,13 +233,16 @@ router.get('/:id', async (req, res, next) => {
       where: { id, agenciaId: trabajador.agencia.id },
       include: {
         cliente: { select: { nombres: true, apellidos: true, numeroDocumento: true, tipoDocumento: true } },
+        empresa: { select: { razonSocial: true, ruc: true } },
         agencia: { select: { nombre: true } },
         cuotas: { orderBy: { numeroCuota: 'asc' } },
       },
     });
     if (!prestamo) { res.status(404).json({ message: 'Préstamo no encontrado.' }); return; }
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ prestamo });
+    const hoy = fechaPeru();
+    const estado = evaluarPrestamo(prestamo, hoy);
+    res.json({ prestamo: { ...prestamo, ...estado, cuotas: prestamo.cuotas.map(c => ({ ...c, estadoVisible: estadoDeCuota(c, hoy) })) } });
   } catch (e) { next(e); }
 });
 

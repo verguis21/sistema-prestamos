@@ -15,6 +15,7 @@ enum RolTrabajador {
 enum TipoDocumento {
   DNI
   RUC10
+  RUC20
 }
 
 enum EstadoPrestamo {
@@ -71,6 +72,26 @@ model Cliente {
 
   prestamos        Prestamo[]
   agenciasAtencion ClienteAgencia[]
+  empresasRepresentadas Empresa[]
+}
+
+// Empresa (RUC 20) y su representante natural asociado.
+// El vínculo de representación es DECLARADO y revisado presencialmente,
+// no equivale a una acreditación oficial SUNARP.
+model Empresa {
+  id                      String   @id @default(uuid())
+  ruc                     String   @unique
+  razonSocial             String
+  estadoSunat             String?
+  representanteId         String
+  representacionRevisadaEn DateTime
+  creadoEn                DateTime @default(now())
+  actualizadoEn           DateTime @updatedAt
+
+  representante Cliente @relation(fields: [representanteId], references: [id])
+  prestamos      Prestamo[]
+
+  @@index([representanteId])
 }
 
 // Un cliente es único para toda la financiera.
@@ -95,6 +116,7 @@ model Prestamo {
   clienteId    String
   agenciaId    String
   trabajadorId String
+  empresaId    String?
 
   monto         Decimal        @db.Decimal(12, 2)
   plazoMeses    Int
@@ -117,11 +139,13 @@ model Prestamo {
   cliente    Cliente    @relation(fields: [clienteId], references: [id])
   agencia    Agencia    @relation(fields: [agenciaId], references: [id])
   trabajador Trabajador @relation(fields: [trabajadorId], references: [id])
+  empresa    Empresa?   @relation(fields: [empresaId], references: [id])
   cuotas     Cuota[]
 
   @@index([clienteId, estado])
   @@index([agenciaId])
   @@index([trabajadorId])
+  @@index([empresaId])
 }
 
 model Cuota {

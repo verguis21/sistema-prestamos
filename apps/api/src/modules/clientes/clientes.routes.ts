@@ -6,6 +6,7 @@ import { requireAuth } from "../../middleware/require-auth.js";
 import { requireRole } from "../../middleware/require-role.js";
 import { ConsultaIdentidadError, obtenerDatosCliente } from "./decolecta.js";
 import { documentosMismaPersona, validarNumero } from "./documentos.js";
+import { estadoDeCliente, evaluarPrestamo, fechaPeru } from "../prestamos/estados.js";
 
 const router = Router();
 router.use(requireAuth, requireRole('ASESOR'));
@@ -58,10 +59,13 @@ router.get("/existente", async (req, res, next) => {
         id: true, tipoDocumento: true, numeroDocumento: true,
         nombres: true, apellidos: true, proveedorIdentidad: true,
         identidadVerificada: true, creadoEn: true,
+        prestamos: { select: { estado: true, cuotas: { select: { estado: true, fechaVencimiento: true, montoCuota: true, capital: true } } } },
       },
     });
+    const { prestamos: prestamosCliente = [], ...datosCliente } = cliente ?? {};
+    const estadoCliente = cliente ? estadoDeCliente(prestamosCliente.map(p => evaluarPrestamo(p, fechaPeru()).estadoCalculado)) : undefined;
     res.setHeader("Cache-Control", "no-store");
-    res.json({ existe: Boolean(cliente), cliente });
+    res.json({ existe: Boolean(cliente), cliente: cliente ? { ...datosCliente, estadoCliente } : null });
   } catch (error) { next(error); }
 });
 
@@ -127,6 +131,19 @@ router.get("/buscar", async (req, res, next) => {
     : { AND: [visiblesEnAgencia(agenciaId), porPalabras] };
 
   try {
+    // RUC 20 es empresa independiente; buscarlo devuelve al representante natural
+    // para mantener su límite global y conservar el RUC en la operación.
+    if (/^20\d{9}$/.test(q)) {
+      const empresa = await prisma.empresa.findUnique({ where: { ruc: q }, include: {
+        representante: { select: { id: true, nombres: true, apellidos: true, tipoDocumento: true,
+          numeroDocumento: true, proveedorIdentidad: true } },
+      } });
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ clientes: empresa ? [{ ...empresa.representante, empresaOperacion: {
+        id: empresa.id, ruc: empresa.ruc, razonSocial: empresa.razonSocial,
+      } }] : [] });
+      return;
+    }
     const clientes = await prisma.cliente.findMany({
       where,
       take: 10,
@@ -152,10 +169,15 @@ router.get("/", async (_req, res, next) => {
         id: true, tipoDocumento: true, numeroDocumento: true,
         nombres: true, apellidos: true, proveedorIdentidad: true,
         identidadVerificada: true, creadoEn: true,
+        prestamos: { select: { estado: true, cuotas: { select: { estado: true, fechaVencimiento: true, montoCuota: true, capital: true } } } },
       },
     });
+    const hoy = fechaPeru();
     res.setHeader("Cache-Control", "no-store");
-    res.json({ clientes });
+    res.json({ clientes: clientes.map(c => {
+      const { prestamos, ...datosCliente } = c;
+      return { ...datosCliente, estadoCliente: estadoDeCliente(prestamos.map(p => evaluarPrestamo(p, hoy).estadoCalculado)) };
+    }) });
   } catch (error) { next(error); }
 });
 

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="370" viewBox="0 0 520 370" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Ilustración de gestión de créditos</title>
+  <desc id="desc">Contrato de crédito aprobado acompañado de un gráfico de crecimiento y monedas estilizadas en tonos verde salvia.</desc>
+  <defs>
+    <linearGradient id="sheet" x1="180" y1="77" x2="352" y2="299" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#F5FBF6"/>
+    </linearGradient>
+    <linearGradient id="coin" x1="378" y1="216" x2="455" y2="290" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C7E3CB"/><stop offset="1" stop-color="#8DBEA1"/>
+    </linearGradient>
+    <linearGradient id="chart" x1="48" y1="240" x2="200" y2="115" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E2F1E6"/><stop offset="1" stop-color="#C1DFCB"/>
+    </linearGradient>
+    <filter id="shadow" x="100" y="15" width="350" height="360" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="16" stdDeviation="19" flood-color="#2D5941" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+  <!-- Fondo geométrico de bajo contraste -->
+  <circle cx="261" cy="182" r="149" stroke="#C7DECD" stroke-width="1.5"/>
+  <circle cx="261" cy="182" r="119" stroke="#DCEADF" stroke-width="1" stroke-dasharray="4 7"/>
+  <circle cx="420" cy="70" r="27" fill="#E2EFE5"/>
+  <circle cx="98" cy="303" r="32" fill="#E5F1E8"/>
+  <circle cx="78" cy="74" r="5" fill="#88AF97"/>
+  <circle cx="466" cy="170" r="4" fill="#A7C8B0"/>
+  <circle cx="92" cy="126" r="3" fill="#B6D3BC"/>
+  <path d="M74 197h16m-8-8v16" stroke="#A7C8AF" stroke-width="2" stroke-linecap="round"/>
+  <path d="M432 121h14m-7-7v14" stroke="#B0CDB8" stroke-width="2" stroke-linecap="round"/>
+  <!-- Tarjeta gráfica lateral -->
+  <rect x="52" y="147" width="151" height="121" rx="21" fill="url(#chart)" stroke="#C7DFCC"/>
+  <rect x="70" y="167" width="51" height="7" rx="3.5" fill="#709D7D" opacity=".75"/>
+  <rect x="70" y="185" width="37" height="6" rx="3" fill="#B4D3BB"/>
+  <path d="M72 241l25-19 20 8 23-32 22 10 20-31" stroke="#3F8060" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="182" cy="177" r="5" fill="#3F8060" stroke="#E9F6EB" stroke-width="3"/>
+  <!-- Documento central -->
+  <g filter="url(#shadow)">
+    <rect x="171" y="52" width="198" height="264" rx="21" fill="url(#sheet)" stroke="#C8DDCE" stroke-width="1.4"/>
+  </g>
+  <rect x="192" y="74" width="156" height="44" rx="12" fill="#EAF4EC"/>
+  <rect x="205" y="86" width="31" height="20" rx="7" fill="#B9D7C2"/>
+  <path d="M214 98h13m-10-6v13" stroke="#2D6C4E" stroke-width="2.7" stroke-linecap="round"/>
+  <rect x="247" y="87" width="81" height="7" rx="3.5" fill="#47735B"/>
+  <rect x="247" y="100" width="56" height="5" rx="2.5" fill="#9DBEAA"/>
+  <rect x="193" y="138" width="90" height="8" rx="4" fill="#4C735C"/>
+  <rect x="193" y="155" width="132" height="6" rx="3" fill="#D1E5D6"/>
+  <rect x="193" y="169" width="111" height="6" rx="3" fill="#D1E5D6"/>
+  <rect x="193" y="192" width="153" height="69" rx="12" fill="#F0F8F2" stroke="#D7E8DB"/>
+  <rect x="205" y="238" width="16" height="12" rx="4" fill="#B6D8BF"/>
+  <rect x="230" y="226" width="16" height="24" rx="4" fill="#95C5A4"/>
+  <rect x="255" y="213" width="16" height="37" rx="4" fill="#73AE87"/>
+  <rect x="280" y="204" width="16" height="46" rx="4" fill="#438263"/>
+  <path d="M306 237l13-13 13 5" stroke="#438263" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="193" y="275" width="91" height="10" rx="5" fill="#D8E9DC"/>
+  <rect x="193" y="292" width="65" height="6" rx="3" fill="#D8E9DC"/>
+  <!-- Confirmación superpuesta -->
+  <circle cx="356" cy="117" r="39" fill="#39795B" stroke="#F6FBF7" stroke-width="8"/>
+  <path d="m339 117 11 11 22-25" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Monedas sobrias -->
+  <ellipse cx="398" cy="290" rx="50" ry="12" fill="#DCEBDD"/>
+  <rect x="365" y="258" width="73" height="25" rx="12.5" fill="#81B493" stroke="#6DA683"/>
+  <ellipse cx="402" cy="256" rx="37" ry="12" fill="url(#coin)" stroke="#6DA683"/>
+  <rect x="381" y="236" width="74" height="22" rx="11" fill="#A3CCAF" stroke="#80AE91"/>
+  <ellipse cx="418" cy="235" rx="37" ry="12" fill="#D1E8D2" stroke="#80AE91"/>
+  <circle cx="419" cy="235" r="7" stroke="#669879" stroke-width="2"/>
+  <path d="M419 230v10m-3-8h5c4 0 4 4 0 4h-5" stroke="#669879" stroke-width="1.4" stroke-linecap="round"/>
+</svg>

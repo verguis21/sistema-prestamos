@@ -1,7 +1,10 @@
+import marcaCreditos from './assets/marca-creditos.svg'
 import { useEffect, useState, type FormEvent } from 'react'
 import './App.css'
 import PrestamosPanel from './PrestamosPanel'
 import GerenciaPanel from './GerenciaPanel'
+import EmpresaPanel from './EmpresaPanel'
+import ilustracionCreditos from './assets/ilustracion-creditos.svg'
 
 type Trabajador = {
   id: string
@@ -18,16 +21,19 @@ type LoginResponse = {
 }
 
 type TipoDocumento = 'DNI' | 'RUC10'
+type TipoConsulta = TipoDocumento | 'RUC20'
 type Cliente = {
   id: string
   tipoDocumento: TipoDocumento
   numeroDocumento: string
   nombres: string
   apellidos: string
-  proveedorIdentidad: string | null
-  identidadVerificada: boolean
-  creadoEn: string
-  documentoOperacion?: { tipoDocumento: TipoDocumento; numeroDocumento: string }
+  proveedorIdentidad?: string | null
+  identidadVerificada?: boolean
+  creadoEn?: string
+  empresaOperacion?: { id: string; ruc: string; razonSocial: string }
+  documentoOperacion?: { tipoDocumento: TipoConsulta; numeroDocumento: string; empresaId?: string }
+  estadoCliente?: 'VIGENTE' | 'MOROSO' | 'EXTRAJUDICIAL' | 'SIN_DEUDA' | 'SIN_PRESTAMOS'
 }
 type Consulta = Pick<Cliente, 'tipoDocumento'|'numeroDocumento'|'nombres'|'apellidos'> & {
   proveedor: string
@@ -101,35 +107,61 @@ function App() {
     return (
       <main className="dashboard-shell">
         <aside className="sidebar">
-          <div className="brand"><span className="brand-mark">SP</span><span>Sistema de<br />Préstamos</span></div>
-          <div className="sidebar-label">{esGerente ? 'GERENCIA GENERAL' : 'SESIÓN ACTIVA'}</div>
+          <div className="brand"><span className="brand-mark"><img src={marcaCreditos} alt="" aria-hidden="true" /></span><span>Gestión de<br />Créditos</span></div>
+          <div className="sidebar-label">{esGerente ? 'PANEL DE GERENCIA' : 'ASESOR DE AGENCIA'}</div>
           <div className="sidebar-user">{trabajador.nombres} {trabajador.apellidos}<small>{trabajador.correo}</small></div>
           <div className="side-nav" aria-label="Módulos del sistema">
             {esGerente ? (
-              <button type="button" className="active" onClick={() => setVista('gerencia')}>Resumen general</button>
+              <button type="button" className="active" onClick={() => setVista('gerencia')}>◈  Gerencia</button>
             ) : <>
-              <button type="button" className={vista === 'inicio' ? 'active' : ''} onClick={() => setVista('inicio')}>Inicio</button>
-              <button type="button" className={vista === 'clientes' ? 'active' : ''} onClick={() => setVista('clientes')}>Clientes</button>
-              <button type="button" className={vista === 'prestamos' ? 'active' : ''} onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}>Préstamos</button>
+              <button type="button" className={vista === 'inicio' ? 'active' : ''} onClick={() => setVista('inicio')}>⌂  Inicio</button>
+              <button type="button" className={vista === 'clientes' ? 'active' : ''} onClick={() => setVista('clientes')}>◎  Clientes</button>
+              <button type="button" className={vista === 'prestamos' ? 'active' : ''} onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}>▤  Préstamos</button>
             </>}
           </div>
-          <button className="logout" onClick={() => { setTrabajador(null); setToken(''); setClienteParaPrestamo(null); setVista('inicio'); setCorreo(''); setPassword(''); setError('') }}>Cerrar sesión</button>
+          <button className="logout" onClick={() => { setTrabajador(null); setToken(''); setClienteParaPrestamo(null); setVista('inicio'); setCorreo(''); setPassword(''); setError('') }}>Salir de la cuenta</button>
         </aside>
-        <section className="dashboard">
+        <section className="dashboard view-enter">
           {esGerente ? <GerenciaPanel token={token} /> : vista === 'clientes' ? <ClientesPanel token={token} trabajador={trabajador} onNuevoPrestamo={cliente => { setClienteParaPrestamo(cliente); setVista('prestamos') }} /> : vista === 'prestamos' ? <PrestamosPanel token={token} trabajador={trabajador} clienteInicial={clienteParaPrestamo} /> : <>
-          <div className="eyebrow">Panel de trabajador</div>
-          <h1>Bienvenido, {trabajador.nombres}</h1>
-          <p className="muted">Tu acceso fue validado contra la base de datos del sistema.</p>
-          <div className="summary-grid">
-            <article className="summary"><span>Agencia asignada</span><strong>{trabajador.agencia.nombre}</strong><small>{trabajador.agencia.ciudad}</small></article>
-            <article className="summary"><span>Identidad de usuario</span><strong>Autenticada</strong><small>Credenciales verificadas por el backend</small></article>
+          <div className="home-view">
+            <section className="home-hero" aria-labelledby="home-title">
+              <div className="home-hero-copy">
+                <div className="eyebrow">PANEL DEL ASESOR · {trabajador.agencia.nombre.toUpperCase()}</div>
+                <h1 id="home-title">Gestiona las operaciones de hoy</h1>
+                <p className="muted page-lead">Consulta la situación de tus clientes y registra créditos desde un solo lugar.</p>
+                <span className="home-agency-indicator"><span className="home-status-dot" aria-hidden="true" />Agencia activa: {trabajador.agencia.nombre}</span>
+              </div>
+              <div className="home-illustration" aria-hidden="true">
+                <img src={ilustracionCreditos} alt="" loading="eager" />
+              </div>
+            </section>
+            <div className="home-work-heading">
+              <div>
+                <span className="eyebrow">ACCESOS DIRECTOS</span>
+                <h2>¿Qué necesitas hacer?</h2>
+              </div>
+              <span className="home-work-caption">Selecciona una operación para continuar</span>
+            </div>
+            <div className="action-grid home-action-grid">
+              <button type="button" className="action-tile" onClick={() => setVista('clientes')}>
+                <span className="action-symbol" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 10.5h5M10.5 8v5"/></svg>
+                </span>
+                <strong>Consultar clientes</strong>
+                <small>Busca por documento y revisa el estado de cada cliente.</small>
+                <span className="action-arrow">Abrir clientes <span aria-hidden="true">↗</span></span>
+              </button>
+              <button type="button" className="action-tile featured" onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}>
+                <span className="action-symbol" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/><path d="m15 16 1.5 1.5L19 15"/></svg>
+                </span>
+                <strong>Registrar préstamo</strong>
+                <small>Simula cuotas, valida el límite y registra la operación.</small>
+                <span className="action-arrow">Abrir préstamos <span aria-hidden="true">↗</span></span>
+              </button>
+            </div>
+            <div className="home-info-line"><span>Producto de crédito</span><span>TEA 30 % · Amortización francesa</span></div>
           </div>
-          <section className="next-module">
-            <span className="status-pill">MVP - Registro de préstamos</span>
-            <h2>Registrar préstamos y generar cronogramas</h2>
-            <p>Ahora puedes registrar préstamos y generar sus cronogramas franceses con TEA del 30 %, sin registrar pagos todavía.</p>
-            <button type="button" className="go-clients" onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}>Registrar un préstamo →</button>
-          </section>
           </>}
         </section>
       </main>
@@ -139,11 +171,11 @@ function App() {
   return (
     <main className="login-shell">
       <section className="intro-panel">
-        <div className="brand"><span className="brand-mark">SP</span><span>Sistema de<br />Préstamos</span></div>
+        <div className="brand"><span className="brand-mark"><img src={marcaCreditos} alt="" aria-hidden="true" /></span><span>Gestión de<br />Créditos</span></div>
         <div className="intro-content">
           <span className="intro-kicker">GESTIÓN DE CRÉDITOS</span>
-          <h1>Un registro preciso. Una operación más segura.</h1>
-          <p>Plataforma interna para el personal de las agencias. Consulta, registra y gestiona operaciones con información centralizada.</p>
+          <h1>Cada crédito bajo control.</h1>
+          <p>Consulta clientes, organiza préstamos y mantén una visión clara de la cartera en todas tus agencias.</p>
         </div>
         <div className="intro-footer">Acceso exclusivo para trabajadores autorizados</div>
       </section>
@@ -151,7 +183,7 @@ function App() {
         <div className="form-wrap">
           <span className="eyebrow">ACCESO AL SISTEMA</span>
           <h2>Iniciar sesión</h2>
-          <p className="muted">Ingresa con las credenciales asignadas a tu agencia.</p>
+          <p className="muted">Accede de forma segura a tus herramientas de trabajo.</p>
           <form onSubmit={ingresar}>
             <label htmlFor="correo">Correo institucional o de acceso</label>
             <input id="correo" type="email" autoComplete="username" required value={correo} onChange={e => setCorreo(e.target.value)} placeholder="asesor@ejemplo.com" />
@@ -172,7 +204,7 @@ function App() {
 
 
 function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; trabajador: Trabajador; onNuevoPrestamo: (cliente: Cliente) => void }) {
-  const [tipoDocumento, setTipoDocumento] = useState<TipoDocumento>('DNI')
+  const [tipoDocumento, setTipoDocumento] = useState<TipoConsulta>('DNI')
   const [numeroDocumento, setNumeroDocumento] = useState('')
   const [consulta, setConsulta] = useState<Consulta | null>(null)
   const [clienteExistente, setClienteExistente] = useState<Cliente | null>(null)
@@ -226,6 +258,7 @@ function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; 
     setConsulta(null)
     setClienteExistente(null)
     setRevisionPresencial(false)
+    if (tipoDocumento === 'RUC20') return
     if (!formatoValido) { setErrorCliente('Revisa la cantidad de dígitos del documento.'); return }
     setConsultando(true)
     try {
@@ -274,33 +307,38 @@ function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; 
   return (
     <div className="clientes-view">
       <div className="eyebrow">MÓDULO DE CLIENTES</div>
-      <h1>Consulta y registro</h1>
-      <p className="muted">Agencia {trabajador.agencia.nombre} · Consulta DNI y RUC 10 en fuentes públicas. Solo para personal autorizado.</p>
+      <h1>Identificación de clientes</h1>
+      <p className="muted">Consulta documentos y revisa el estado del cliente en {trabajador.agencia.nombre}.</p>
       <div className="clients-grid">
         <section className="client-card">
-          <h2>Buscar persona</h2>
-          <p className="muted">Busca primero en la base central. Si ya existe, no necesitas registrarlo otra vez.</p>
+          <h2>{tipoDocumento === 'RUC20' ? 'Buscar empresa' : 'Buscar persona'}</h2>
+          <p className="muted">{tipoDocumento === 'RUC20' ? 'Consulta la razón social y los datos vinculados.' : 'Busca por documento antes de iniciar la operación.'}</p>
           <form onSubmit={buscar} className="document-form">
             <label htmlFor="tipoDoc">Tipo de documento</label>
-            <select id="tipoDoc" value={tipoDocumento} onChange={e => { setTipoDocumento(e.target.value as TipoDocumento); cambiarDocumento('') }}>
+            <select id="tipoDoc" value={tipoDocumento} onChange={e => { setTipoDocumento(e.target.value as TipoConsulta); cambiarDocumento('') }}>
               <option value="DNI">DNI — 8 dígitos</option>
               <option value="RUC10">RUC 10 — 11 dígitos</option>
+              <option value="RUC20">RUC 20 — Empresa</option>
             </select>
+            {tipoDocumento !== 'RUC20' && <>
             <label htmlFor="docNumero">Número de documento</label>
             <input id="docNumero" value={numeroDocumento} onChange={e => cambiarDocumento(e.target.value)} inputMode="numeric" autoComplete="off" placeholder={tipoDocumento === 'DNI' ? '8 números' : '10 + DNI + dígito verificador'} maxLength={tipoDocumento === 'DNI' ? 8 : 11} required />
             <button className="submit" type="submit" disabled={!formatoValido || consultando}>{consultando ? 'Consultando...' : 'Consultar datos'} <span aria-hidden="true">→</span></button>
+            </>}
           </form>
-          {errorCliente && <div role="alert" className="form-error notice">{errorCliente}</div>}
+          {tipoDocumento === 'RUC20' && <EmpresaPanel token={token} onNuevoPrestamo={onNuevoPrestamo} />}
+          {errorCliente && tipoDocumento !== 'RUC20' && <div role="alert" className="form-error notice">{errorCliente}</div>}
           {mensaje && <div role="status" className="success-notice">{mensaje}</div>}
-          {clienteExistente && <section className="person-result" aria-label="Cliente existente">
-            <span className="status-pill">Ya registrado en la empresa</span>
+          {tipoDocumento !== 'RUC20' && clienteExistente && <section className="person-result" aria-label="Cliente existente">
+            <span className="status-pill">Cliente registrado</span>
+            {clienteExistente.estadoCliente && <span className={`client-source estado-${clienteExistente.estadoCliente.toLowerCase()}`} style={{marginLeft:8}}>{({VIGENTE:'Vigente',MOROSO:'Moroso',EXTRAJUDICIAL:'Extrajudicial',SIN_DEUDA:'Sin deuda',SIN_PRESTAMOS:'Sin préstamos'} as const)[clienteExistente.estadoCliente]}</span>}
             <h3>{clienteExistente.apellidos}, {clienteExistente.nombres}</h3>
             <p className="muted">Documento consultado: {tipoDocumento} {numeroDocumento}</p>
-            <p className="muted">Registro principal: {clienteExistente.tipoDocumento} {clienteExistente.numeroDocumento}. Se utiliza una única identidad para controlar el límite global, aunque consultes con DNI o RUC 10.</p>
-            <p className="identity-warning">No se creará otro cliente ni se cambiará su sucursal por esta consulta. Si usaste un RUC 10, confirma también que esté activo en SUNAT.</p>
-            <button type="button" className="submit" onClick={() => onNuevoPrestamo({ ...clienteExistente, documentoOperacion: { tipoDocumento, numeroDocumento } })}>Continuar a nuevo préstamo <span aria-hidden="true">→</span></button>
+            <p className="muted">Ficha principal: {clienteExistente.tipoDocumento} {clienteExistente.numeroDocumento} · Límite único de S/ 10 000.</p>
+            <p className="identity-warning">Esta consulta no genera otro registro. Confirma presencialmente la identidad antes de otorgar crédito.</p>
+            <button type="button" className="submit" onClick={() => onNuevoPrestamo({ ...clienteExistente, documentoOperacion: { tipoDocumento: tipoDocumento as TipoDocumento, numeroDocumento } })}>Continuar a nuevo préstamo <span aria-hidden="true">→</span></button>
           </section>}
-          {consulta && <section className="person-result" aria-label="Datos consultados">
+          {tipoDocumento !== 'RUC20' && consulta && <section className="person-result" aria-label="Datos consultados">
             <span className="status-pill">Datos encontrados</span>
             <h3>{consulta.apellidos}, {consulta.nombres}</h3>
             <dl><div><dt>Documento</dt><dd>{consulta.numeroDocumento}</dd></div><div><dt>Origen</dt><dd>Decolecta · Datos públicos</dd></div>{consulta.estadoRuc && <div><dt>Estado RUC</dt><dd>{consulta.estadoRuc}</dd></div>}</dl>
@@ -314,11 +352,11 @@ function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; 
           {cargandoLista ? <p className="muted">Cargando...</p> : clientes.length ?
           <div className="client-list">{clientes.map(cliente => <div className="client-row" key={cliente.id}>
             <div><strong>{cliente.apellidos}, {cliente.nombres}</strong><small>{cliente.tipoDocumento === 'DNI' ? 'DNI' : 'RUC 10'} · {cliente.numeroDocumento}</small></div>
-            <span className="client-source">Datos consultados</span>
+            <span className={`client-source estado-${(cliente.estadoCliente ?? 'SIN_PRESTAMOS').toLowerCase()}`}>{({VIGENTE:'Vigente',MOROSO:'Moroso',EXTRAJUDICIAL:'Extrajudicial',SIN_DEUDA:'Sin deuda',SIN_PRESTAMOS:'Sin préstamos'} as const)[cliente.estadoCliente ?? 'SIN_PRESTAMOS']}</span>
           </div>)}</div> : <p className="empty-list">Todavía no hay clientes vinculados a esta agencia. Registra un cliente nuevo o completa un préstamo en esta agencia para empezar.</p>}
         </section>
       </div>
-      <p className="identity-footnote">Para un sistema crediticio en operación real se necesitarán controles de identidad autorizados, revisión de documentos y protección de datos personales.</p>
+      
     </div>
   )
 }
