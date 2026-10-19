@@ -346,7 +346,7 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
             </table>
           </div>
         </section>
-        <p className="schedule-note schedule-page-note">TEA 30 % · Sistema francés · Año comercial de 360 días. La mora adicional no está incluida; está pendiente de confirmación.</p>
+        <p className="schedule-note schedule-page-note">TEA 30 % · Tasa efectiva cada 30 días: 2.210445 % · Sistema francés, base 360 días. TCEA no calculada: faltan definir costos adicionales. Sin mora por atraso.</p>
         <div className="schedule-page-bottom no-print">
           <button type="button" className="schedule-back" onClick={volverAPrestamos}>← Volver a préstamos</button>
         </div>
