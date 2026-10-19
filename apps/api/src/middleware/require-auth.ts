@@ -19,6 +19,7 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
         apellidos: true,
         correo: true,
         activo: true,
+        rol: true,
         agencia: { select: { id: true, nombre: true, ciudad: true, activa: true } },
       },
     });
@@ -33,6 +34,7 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
       nombres: trabajador.nombres,
       apellidos: trabajador.apellidos,
       correo: trabajador.correo,
+      rol: trabajador.rol,
       agencia: {
         id: trabajador.agencia.id,
         nombre: trabajador.agencia.nombre,

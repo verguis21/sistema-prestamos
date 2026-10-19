@@ -3,11 +3,12 @@ import { Prisma } from "../../../generated/prisma/client.js";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { requireAuth } from "../../middleware/require-auth.js";
+import { requireRole } from "../../middleware/require-role.js";
 import { ConsultaIdentidadError, obtenerDatosCliente } from "./decolecta.js";
 import { documentosMismaPersona, validarNumero } from "./documentos.js";
 
 const router = Router();
-router.use(requireAuth);
+router.use(requireAuth, requireRole('ASESOR'));
 
 const documentoSchema = z.object({
   tipoDocumento: z.enum(["DNI", "RUC10"]),

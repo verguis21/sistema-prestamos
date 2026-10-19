@@ -156,3 +156,22 @@
 .estado-vencida { background: #fff0e8; color: #9b461f; }
 .estado-pagada { background: #e5f5e9; color: #176738; }
 .schedule-table { min-width: 710px; }
+
+/* Actualización 11: panel general de gerencia */
+.gerencia-view { max-width: 1230px; }
+.gerencia-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.gerencia-heading .muted { margin:7px 0 12px; }
+.gerencia-cutoff { color:#6e8094; font-size:12px; margin:4px 0 22px; }
+.gerencia-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:17px; }
+.gerencia-stat { padding:24px; background:#fff; border:1px solid #dee8ef; border-radius:14px; min-width:0; box-shadow:0 6px 26px rgba(12,44,68,.04); }
+.gerencia-stat span,.gerencia-stat small { display:block; color:#6d8195; font-size:13px; }
+.gerencia-stat strong { display:block; margin:12px 0 7px; color:#113754; font-size:clamp(22px,2.25vw,30px); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.gerencia-stat small { font-size:12px; line-height:1.6; }
+.gerencia-pending { background:white; border:1px solid #e0e9f0; border-radius:14px; padding:25px; margin-top:25px; }
+.gerencia-pending h2 { margin:0; font-size:20px; }
+.gerencia-pending-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:22px; }
+.gerencia-pending-grid div { background:#f4f7fa; border-radius:9px; padding:17px; }
+.gerencia-pending-grid span { display:block; font-size:12px; color:#6e7d8e; }
+.gerencia-pending-grid strong { display:block; margin-top:7px; font-size:14px; color:#34566d; }
+@media(max-width:1000px) { .gerencia-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:600px) { .gerencia-grid,.gerencia-pending-grid {grid-template-columns:1fr;} .gerencia-heading { flex-direction:column; align-items:start; } }

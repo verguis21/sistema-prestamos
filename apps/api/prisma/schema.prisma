@@ -7,6 +7,11 @@ datasource db {
   provider = "postgresql"
 }
 
+enum RolTrabajador {
+  ASESOR
+  GERENTE
+}
+
 enum TipoDocumento {
   DNI
   RUC10
@@ -40,6 +45,7 @@ model Trabajador {
   apellidos    String
   correo       String   @unique
   passwordHash String
+  rol          RolTrabajador @default(ASESOR)
   activo       Boolean  @default(true)
   agenciaId    String
   creadoEn     DateTime @default(now())
@@ -90,20 +96,20 @@ model Prestamo {
   agenciaId    String
   trabajadorId String
 
-  monto                    Decimal        @db.Decimal(12, 2)
-  plazoMeses               Int
-  tea                      Decimal        @default(0.30) @db.Decimal(8, 6)
-  baseDias                 Int            @default(360)
-  diasPeriodo              Int            @default(30)
-  fechaPrestamo            DateTime       @db.Date
+  monto         Decimal        @db.Decimal(12, 2)
+  plazoMeses    Int
+  tea           Decimal        @default(0.30) @db.Decimal(8, 6)
+  baseDias      Int            @default(360)
+  diasPeriodo   Int            @default(30)
+  fechaPrestamo DateTime       @db.Date
   // Documento presentado para ESTA operación. Puede ser distinto al principal del cliente.
   // Nullable solo por compatibilidad con préstamos registrados antes de esta actualización.
   tipoDocumentoOperacion   TipoDocumento?
   numeroDocumentoOperacion String?
-  cuotaFija                Decimal        @db.Decimal(12, 2)
-  interesTotal             Decimal        @db.Decimal(12, 2)
-  montoTotal               Decimal        @db.Decimal(12, 2)
-  estado                   EstadoPrestamo @default(ACTIVO)
+  cuotaFija     Decimal        @db.Decimal(12, 2)
+  interesTotal  Decimal        @db.Decimal(12, 2)
+  montoTotal    Decimal        @db.Decimal(12, 2)
+  estado        EstadoPrestamo @default(ACTIVO)
 
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt

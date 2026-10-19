@@ -33,6 +33,15 @@ function elegirDocumento(cliente: Cliente, consultado: string): DocumentoOperaci
     ?? { tipoDocumento: cliente.tipoDocumento, numeroDocumento: cliente.numeroDocumento }
 }
 const rotuloDocumento = (d: DocumentoOperacion) => `${d.tipoDocumento === 'RUC10' ? 'RUC 10' : 'DNI'} ${d.numeroDocumento}`
+// El cliente conserva su documento principal, pero el resultado de búsqueda
+// debe mostrar claramente el DNI/RUC que el asesor escribió para esta operación.
+function rotuloHallazgo(cliente: Cliente, busqueda: string): string {
+  const consultado = busqueda.trim()
+  const documentos = documentosDisponibles(cliente)
+  const encontrado = documentos.find(d => d.numeroDocumento === consultado)
+  return encontrado ? `Encontrado con ${rotuloDocumento(encontrado)} · ficha principal: ${cliente.tipoDocumento === 'RUC10' ? 'RUC 10' : 'DNI'}`
+    : `Ficha principal: ${cliente.tipoDocumento === 'RUC10' ? 'RUC 10' : 'DNI'} ${cliente.numeroDocumento}`
+}
 // Los estados de esta pantalla se derivan de las fechas y de pagos REGISTRADOS.
 // No crea pagos ni aplica mora; es una lectura del cronograma actual.
 function estadoVisible(cuota: Fila): 'Pagada' | 'Vencida' | 'Pendiente' {
@@ -73,12 +82,24 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
   const cerrarRef = useRef<HTMLButtonElement | null>(null)
 
   async function peticion<T>(url: string, options: RequestInit = {}): Promise<T> {
-    const respuesta = await fetch(`${BASE}${url}`, {
-      ...options,
-      headers: { Authorization: `Bearer ${token}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
-      cache: 'no-store',
-    })
-    const data: T & { message?: string } = await respuesta.json()
+    const limiteMs = options.method === 'POST' ? 30000 : 15000
+    const reloj = AbortSignal.timeout(limiteMs)
+    const signal = options.signal ? AbortSignal.any([options.signal, reloj]) : reloj
+    let respuesta: Response
+    try {
+      respuesta = await fetch(`${BASE}${url}`, {
+        ...options,
+        signal,
+        headers: { Authorization: `Bearer ${token}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
+        cache: 'no-store',
+      })
+    } catch (e) {
+      if (reloj.aborted) throw new Error('La operación tardó demasiado. Comprueba tu conexión con el servidor.')
+      throw e
+    }
+    let data: T & { message?: string }
+    try { data = await respuesta.json() }
+    catch { throw new Error('El servidor respondió con datos que no se pudieron interpretar.') }
     if (!respuesta.ok) throw new Error(data.message ?? 'No fue posible completar la operación.')
     return data
   }
@@ -183,18 +204,49 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
   }
 
   async function confirmar() {
-    if (!preview || !window.confirm('¿Confirmas el registro del préstamo y de todas sus cuotas?')) return
-    setOcupado(true); setError('')
+    if (!preview || ocupado || !window.confirm('¿Confirmas el registro del préstamo y de todas sus cuotas?')) return
+    setOcupado(true); setError(''); setMensaje('')
+    let guardado: { id: string }
     try {
-      const guardado = await peticion<{ id: string }>('/api/prestamos', { method: 'POST', body: JSON.stringify(formulario) })
+      guardado = await peticion<{ id: string }>('/api/prestamos', { method: 'POST', body: JSON.stringify(formulario) })
+    } catch (e) {
+      // Si la red falla al guardar, el servidor podría haber recibido el POST.
+      // Nunca hacer un reintento automático que podría duplicar el préstamo.
+      const texto = e instanceof Error ? e.message : 'No fue posible confirmar el registro.'
+      setError(texto.includes('tardó demasiado') || e instanceof TypeError
+        ? 'No se pudo confirmar si el préstamo quedó guardado. Actualiza el listado y revisa los préstamos de este cliente ANTES de intentar registrarlo otra vez.'
+        : texto)
+      setRecargar(n => n + 1)
+      setOcupado(false)
+      return
+    }
+
+    // El POST sí confirmó el registro: limpiar el formulario INMEDIATAMENTE.
+    // No supeditar el éxito del guardado a que una segunda consulta abra el cronograma.
+    setClienteId('')
+    setClienteSeleccionado(null)
+    setDocumentoOperacion(null)
+    setTextoCliente('')
+    setCoincidencias([])
+    setErrorCliente('')
+    setMonto('')
+    setPlazoMeses(12)
+    setFechaPrestamo(hoy)
+    setPreview(null)
+    setMensaje('Préstamo guardado correctamente. El formulario quedó listo para una nueva atención.')
+    setPagina(1); setBusquedaAplicada(''); setEstadoAplicado('TODOS')
+    setTextoBusqueda(''); setFiltroEstado('TODOS'); setRecargar(n => n + 1)
+
+    try {
       const resultado = await peticion<{ prestamo: Detalle }>(`/api/prestamos/${guardado.id}`)
-      setDetalle(resultado.prestamo); setPreview(null); setModalAbierto(true)
-      setMensaje('Préstamo y cronograma registrados correctamente en Supabase.')
-      // Mostrar el nuevo préstamo sin filtros anteriores.
-      setPagina(1); setBusquedaAplicada(''); setEstadoAplicado('TODOS')
-      setTextoBusqueda(''); setFiltroEstado('TODOS'); setRecargar(n => n + 1)
-    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo registrar el préstamo.') }
-    finally { setOcupado(false) }
+      setDetalle(resultado.prestamo)
+      setModalAbierto(true)
+    } catch {
+      // El préstamo YA está guardado: no mostrar un error falso de guardado.
+      setMensaje('Préstamo guardado. No se pudo abrir el cronograma automáticamente; búscalo en el listado con «Ver cronograma».')
+    } finally {
+      setOcupado(false)
+    }
   }
 
   async function verDetalle(id: string) {
@@ -238,7 +290,7 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
               maxLength={80}
               aria-describedby="loanClienteAyuda"
             />
-            <p id="loanClienteAyuda" className="loan-client-hint">Busca en todos los clientes registrados, no solo en los últimos 50.</p>
+            <p id="loanClienteAyuda" className="loan-client-hint">DNI o RUC completo: búsqueda global. Nombre: clientes atendidos en tu agencia.</p>
             {buscandoCliente && !clienteSeleccionado && <p className="loan-client-feedback" role="status">Buscando en la base de datos...</p>}
             {errorCliente && <p className="form-error notice" role="alert">{errorCliente}</p>}
             {!clienteSeleccionado && textoCliente.trim().length >= 2 && !buscandoCliente && !errorCliente && coincidencias.length === 0 &&
@@ -246,7 +298,7 @@ export default function PrestamosPanel({ token, trabajador, clienteInicial = nul
             {!clienteSeleccionado && coincidencias.length > 0 && <div className="loan-client-results" aria-label="Clientes encontrados">
               {coincidencias.map(c => <button className="loan-client-option" type="button" key={c.id} onClick={() => seleccionarCliente(c)}>
                 <strong>{c.apellidos}, {c.nombres}</strong>
-                <small>{c.tipoDocumento === 'DNI' ? 'DNI' : 'RUC 10'} · {c.numeroDocumento}</small>
+                <small>{rotuloHallazgo(c, textoCliente)}</small>
               </button>)}
             </div>}
             {clienteSeleccionado && <div className="loan-client-selected" role="status">

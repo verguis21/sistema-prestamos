@@ -52,6 +52,7 @@ router.post("/login", async (req, res, next) => {
         correo: true,
         passwordHash: true,
         activo: true,
+        rol: true,
         agencia: {
           select: { id: true, nombre: true, ciudad: true, activa: true },
         },
@@ -78,6 +79,7 @@ router.post("/login", async (req, res, next) => {
         nombres: trabajador.nombres,
         apellidos: trabajador.apellidos,
         correo: trabajador.correo,
+        rol: trabajador.rol,
         agencia: trabajador.agencia,
       },
     });

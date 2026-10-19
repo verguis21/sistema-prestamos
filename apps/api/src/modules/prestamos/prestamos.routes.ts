@@ -4,10 +4,11 @@ import { z } from 'zod';
 import type { Prisma } from '../../../generated/prisma/client.js';
 import { prisma } from '../../lib/prisma.js';
 import { requireAuth } from '../../middleware/require-auth.js';
+import { requireRole } from '../../middleware/require-role.js';
 import { centimosDeMonto, convertirFecha, dinero, generarCronograma, LIMITE_CENTIMOS } from './calculo.js';
 
 const router = Router();
-router.use(requireAuth);
+router.use(requireAuth, requireRole('ASESOR'));
 
 const solicitud = z.object({
   clienteId: z.string().uuid(),

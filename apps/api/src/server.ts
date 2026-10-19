@@ -5,6 +5,7 @@ import { prisma } from "./lib/prisma.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import clientesRouter from "./modules/clientes/clientes.routes.js";
 import prestamosRouter from "./modules/prestamos/prestamos.routes.js";
+import gerenciaRouter from "./modules/gerencia/gerencia.routes.js";
 import { validateTokenConfig } from "./lib/tokens.js";
 
 validateTokenConfig();
@@ -34,6 +35,7 @@ app.get("/api/health/db", async (_req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/clientes", clientesRouter);
 app.use("/api/prestamos", prestamosRouter);
+app.use("/api/gerencia", gerenciaRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("Error de la API:", error);

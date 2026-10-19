@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import './App.css'
 import PrestamosPanel from './PrestamosPanel'
+import GerenciaPanel from './GerenciaPanel'
 
 type Trabajador = {
   id: string
   nombres: string
   apellidos: string
   correo: string
+  rol: 'ASESOR' | 'GERENTE'
   agencia: { id: string; nombre: string; ciudad: string }
 }
 
@@ -36,13 +38,27 @@ type Consulta = Pick<Cliente, 'tipoDocumento'|'numeroDocumento'|'nombres'|'apell
 
 const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 
+// Cada operación tiene un máximo de espera para no dejar bloqueado al asesor.
+// Abortamos la petición del navegador, pero no asumimos que un POST no haya llegado al servidor.
+async function fetchConTiempo(url: string, options: RequestInit = {}): Promise<Response> {
+  const limiteMs = options.method === 'POST' ? 30000 : 15000
+  const reloj = AbortSignal.timeout(limiteMs)
+  const signal = options.signal ? AbortSignal.any([options.signal, reloj]) : reloj
+  try {
+    return await fetch(url, { ...options, signal })
+  } catch (e) {
+    if (reloj.aborted) throw new Error('La consulta tardó demasiado. Revisa tu conexión e inténtalo de nuevo.')
+    throw e
+  }
+}
+
 function App() {
   const [correo, setCorreo] = useState('')
   const [password, setPassword] = useState('')
   const [mostrarPassword, setMostrarPassword] = useState(false)
   const [trabajador, setTrabajador] = useState<Trabajador | null>(null)
   const [token, setToken] = useState('')
-  const [vista, setVista] = useState<'inicio' | 'clientes' | 'prestamos'>('inicio')
+  const [vista, setVista] = useState<'inicio' | 'clientes' | 'prestamos' | 'gerencia'>('inicio')
   const [clienteParaPrestamo, setClienteParaPrestamo] = useState<Cliente | null>(null)
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState('')
@@ -53,7 +69,7 @@ function App() {
     setCargando(true)
 
     try {
-      const respuesta = await fetch(`${API_URL}/api/auth/login`, {
+      const respuesta = await fetchConTiempo(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ correo: correo.trim(), password }),
@@ -64,14 +80,14 @@ function App() {
       }
 
       // Comprobar que una ruta protegida reconoce la sesión real.
-      const perfil = await fetch(`${API_URL}/api/auth/me`, {
+      const perfil = await fetchConTiempo(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${data.token}` },
       })
       if (!perfil.ok) throw new Error('No fue posible validar la sesión.')
       const resultado: { trabajador: Trabajador } = await perfil.json()
       setTrabajador(resultado.trabajador)
       setToken(data.token)
-      setVista('inicio')
+      setVista(resultado.trabajador.rol === 'GERENTE' ? 'gerencia' : 'inicio')
       setPassword('')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al conectar con la API.')
@@ -81,21 +97,26 @@ function App() {
   }
 
   if (trabajador) {
+    const esGerente = trabajador.rol === 'GERENTE'
     return (
       <main className="dashboard-shell">
         <aside className="sidebar">
           <div className="brand"><span className="brand-mark">SP</span><span>Sistema de<br />Préstamos</span></div>
-          <div className="sidebar-label">SESIÓN ACTIVA</div>
+          <div className="sidebar-label">{esGerente ? 'GERENCIA GENERAL' : 'SESIÓN ACTIVA'}</div>
           <div className="sidebar-user">{trabajador.nombres} {trabajador.apellidos}<small>{trabajador.correo}</small></div>
           <div className="side-nav" aria-label="Módulos del sistema">
-            <button type="button" className={vista === 'inicio' ? 'active' : ''} onClick={() => setVista('inicio')}>Inicio</button>
-            <button type="button" className={vista === 'clientes' ? 'active' : ''} onClick={() => setVista('clientes')}>Clientes</button>
-            <button type="button" className={vista === 'prestamos' ? 'active' : ''} onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}>Préstamos</button>
+            {esGerente ? (
+              <button type="button" className="active" onClick={() => setVista('gerencia')}>Resumen general</button>
+            ) : <>
+              <button type="button" className={vista === 'inicio' ? 'active' : ''} onClick={() => setVista('inicio')}>Inicio</button>
+              <button type="button" className={vista === 'clientes' ? 'active' : ''} onClick={() => setVista('clientes')}>Clientes</button>
+              <button type="button" className={vista === 'prestamos' ? 'active' : ''} onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}>Préstamos</button>
+            </>}
           </div>
           <button className="logout" onClick={() => { setTrabajador(null); setToken(''); setClienteParaPrestamo(null); setVista('inicio'); setCorreo(''); setPassword(''); setError('') }}>Cerrar sesión</button>
         </aside>
         <section className="dashboard">
-          {vista === 'clientes' ? <ClientesPanel token={token} trabajador={trabajador} onNuevoPrestamo={cliente => { setClienteParaPrestamo(cliente); setVista('prestamos') }} /> : vista === 'prestamos' ? <PrestamosPanel token={token} trabajador={trabajador} clienteInicial={clienteParaPrestamo} /> : <>
+          {esGerente ? <GerenciaPanel token={token} /> : vista === 'clientes' ? <ClientesPanel token={token} trabajador={trabajador} onNuevoPrestamo={cliente => { setClienteParaPrestamo(cliente); setVista('prestamos') }} /> : vista === 'prestamos' ? <PrestamosPanel token={token} trabajador={trabajador} clienteInicial={clienteParaPrestamo} /> : <>
           <div className="eyebrow">Panel de trabajador</div>
           <h1>Bienvenido, {trabajador.nombres}</h1>
           <p className="muted">Tu acceso fue validado contra la base de datos del sistema.</p>
@@ -166,7 +187,7 @@ function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; 
   async function cargarClientes() {
     setCargandoLista(true)
     try {
-      const respuesta = await fetch(`${API_URL}/api/clientes`, {
+      const respuesta = await fetchConTiempo(`${API_URL}/api/clientes`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       })
@@ -211,14 +232,14 @@ function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; 
       const parametros = new URLSearchParams({ tipoDocumento, numeroDocumento })
       const headers = { Authorization: `Bearer ${token}` }
       // Si ya existe, no gastar una consulta externa ni mostrar Registrar cliente.
-      const existente = await fetch(`${API_URL}/api/clientes/existente?${parametros}`, { headers, cache: 'no-store' })
+      const existente = await fetchConTiempo(`${API_URL}/api/clientes/existente?${parametros}`, { headers, cache: 'no-store' })
       const encontrado: { existe?: boolean; cliente?: Cliente | null; message?: string } = await existente.json()
       if (!existente.ok) throw new Error(encontrado.message ?? 'No se pudo revisar el registro central.')
       if (encontrado.existe && encontrado.cliente) {
         setClienteExistente(encontrado.cliente)
         return
       }
-      const respuesta = await fetch(`${API_URL}/api/clientes/consulta?${parametros}`, { headers, cache: 'no-store' })
+      const respuesta = await fetchConTiempo(`${API_URL}/api/clientes/consulta?${parametros}`, { headers, cache: 'no-store' })
       const data: { datos?: Consulta; message?: string } = await respuesta.json()
       if (!respuesta.ok || !data.datos) throw new Error(data.message ?? 'Consulta no disponible.')
       setConsulta(data.datos)
@@ -233,7 +254,7 @@ function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; 
     setErrorCliente('')
     setMensaje('')
     try {
-      const respuesta = await fetch(`${API_URL}/api/clientes`, {
+      const respuesta = await fetchConTiempo(`${API_URL}/api/clientes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ tipoDocumento: consulta.tipoDocumento, numeroDocumento: consulta.numeroDocumento, revisionPresencialConfirmada: true }),
@@ -246,7 +267,7 @@ function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; 
       setRevisionPresencial(false)
       await cargarClientes()
     } catch (e) {
-      setErrorCliente(e instanceof Error ? e.message : 'Error guardando cliente.')
+      setErrorCliente(e instanceof Error && e.message.includes('tardó demasiado') ? 'No pudimos confirmar si el cliente fue guardado. Actualiza la lista o vuelve a buscar el documento antes de repetir el registro.' : e instanceof Error ? e.message : 'Error guardando cliente.')
     } finally { setGuardando(false) }
   }
 
