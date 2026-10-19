@@ -58,6 +58,18 @@ async function fetchConTiempo(url: string, options: RequestInit = {}): Promise<R
   }
 }
 
+type NavigationIcon = 'inicio' | 'clientes' | 'prestamos' | 'gerencia'
+
+function NavigationSymbol({ name }: { name: NavigationIcon }) {
+  const comun = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  return <svg className="nav-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...comun}>
+    {name === 'inicio' ? <><path d="m3.5 10 8.5-7 8.5 7"/><path d="M6 9.5V21h12V9.5M10 21v-7h4v7"/></> : null}
+    {name === 'clientes' ? <><circle cx="9" cy="8" r="3"/><path d="M2.8 20c0-4.2 2.5-6.5 6.2-6.5s6.2 2.3 6.2 6.5"/><path d="M17 7h4M17 11h4"/></> : null}
+    {name === 'prestamos' ? <><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></> : null}
+    {name === 'gerencia' ? <><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="8" width="4" height="13" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></> : null}
+  </svg>
+}
+
 function App() {
   const [correo, setCorreo] = useState('')
   const [password, setPassword] = useState('')
@@ -109,16 +121,16 @@ function App() {
         <aside className="sidebar">
           <div className="brand"><span className="brand-mark"><img src={marcaCreditos} alt="" aria-hidden="true" /></span><span>Gestión de<br />Créditos</span></div>
           <div className="sidebar-label">{esGerente ? 'PANEL DE GERENCIA' : 'ASESOR DE AGENCIA'}</div>
-          <div className="sidebar-user">{trabajador.nombres} {trabajador.apellidos}<small>{trabajador.correo}</small></div>
-          <div className="side-nav" aria-label="Módulos del sistema">
+          <div className="sidebar-user"><span>{trabajador.nombres} {trabajador.apellidos}</span><small>{esGerente ? 'Gerencia general' : trabajador.agencia.nombre}</small></div>
+          <nav className="side-nav" aria-label="Navegación principal">
             {esGerente ? (
-              <button type="button" className="active" onClick={() => setVista('gerencia')}>◈  Gerencia</button>
+              <button type="button" className="active" onClick={() => setVista('gerencia')}><NavigationSymbol name="gerencia" /> Gerencia</button>
             ) : <>
-              <button type="button" className={vista === 'inicio' ? 'active' : ''} onClick={() => setVista('inicio')}>⌂  Inicio</button>
-              <button type="button" className={vista === 'clientes' ? 'active' : ''} onClick={() => setVista('clientes')}>◎  Clientes</button>
-              <button type="button" className={vista === 'prestamos' ? 'active' : ''} onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}>▤  Préstamos</button>
+              <button type="button" className={vista === 'inicio' ? 'active' : ''} onClick={() => setVista('inicio')}><NavigationSymbol name="inicio" /> Inicio</button>
+              <button type="button" className={vista === 'clientes' ? 'active' : ''} onClick={() => setVista('clientes')}><NavigationSymbol name="clientes" /> Clientes</button>
+              <button type="button" className={vista === 'prestamos' ? 'active' : ''} onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}><NavigationSymbol name="prestamos" /> Préstamos</button>
             </>}
-          </div>
+          </nav>
           <button className="logout" onClick={() => { setTrabajador(null); setToken(''); setClienteParaPrestamo(null); setVista('inicio'); setCorreo(''); setPassword(''); setError('') }}>Salir de la cuenta</button>
         </aside>
         <section className="dashboard view-enter">
@@ -126,10 +138,10 @@ function App() {
           <div className="home-view">
             <section className="home-hero" aria-labelledby="home-title">
               <div className="home-hero-copy">
-                <div className="eyebrow">PANEL DEL ASESOR · {trabajador.agencia.nombre.toUpperCase()}</div>
-                <h1 id="home-title">Gestiona las operaciones de hoy</h1>
-                <p className="muted page-lead">Consulta la situación de tus clientes y registra créditos desde un solo lugar.</p>
-                <span className="home-agency-indicator"><span className="home-status-dot" aria-hidden="true" />Agencia activa: {trabajador.agencia.nombre}</span>
+                <div className="eyebrow">ÁREA DEL ASESOR</div>
+                <h1 id="home-title">Tu espacio de trabajo</h1>
+                <p className="muted page-lead">Todo lo necesario para atender a tus clientes.</p>
+                <span className="home-agency-indicator"><span className="home-status-dot" aria-hidden="true" />{trabajador.agencia.nombre}</span>
               </div>
               <div className="home-illustration" aria-hidden="true">
                 <img src={ilustracionCreditos} alt="" loading="eager" />
@@ -137,10 +149,9 @@ function App() {
             </section>
             <div className="home-work-heading">
               <div>
-                <span className="eyebrow">ACCESOS DIRECTOS</span>
-                <h2>¿Qué necesitas hacer?</h2>
+                <span className="eyebrow">OPERACIONES</span>
+                <h2>¿Qué deseas hacer?</h2>
               </div>
-              <span className="home-work-caption">Selecciona una operación para continuar</span>
             </div>
             <div className="action-grid home-action-grid">
               <button type="button" className="action-tile" onClick={() => setVista('clientes')}>
@@ -148,19 +159,18 @@ function App() {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 10.5h5M10.5 8v5"/></svg>
                 </span>
                 <strong>Consultar clientes</strong>
-                <small>Busca por documento y revisa el estado de cada cliente.</small>
-                <span className="action-arrow">Abrir clientes <span aria-hidden="true">↗</span></span>
+                <small>Busca por DNI o RUC y revisa su estado.</small>
+                <span className="action-arrow">Continuar <span aria-hidden="true">→</span></span>
               </button>
               <button type="button" className="action-tile featured" onClick={() => { setClienteParaPrestamo(null); setVista('prestamos') }}>
                 <span className="action-symbol" aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/><path d="m15 16 1.5 1.5L19 15"/></svg>
                 </span>
                 <strong>Registrar préstamo</strong>
-                <small>Simula cuotas, valida el límite y registra la operación.</small>
-                <span className="action-arrow">Abrir préstamos <span aria-hidden="true">↗</span></span>
+                <small>Calcula las cuotas y registra el crédito.</small>
+                <span className="action-arrow">Continuar <span aria-hidden="true">→</span></span>
               </button>
             </div>
-            <div className="home-info-line"><span>Producto de crédito</span><span>TEA 30 % · Amortización francesa</span></div>
           </div>
           </>}
         </section>
@@ -175,7 +185,7 @@ function App() {
         <div className="intro-content">
           <span className="intro-kicker">GESTIÓN DE CRÉDITOS</span>
           <h1>Cada crédito bajo control.</h1>
-          <p>Consulta clientes, organiza préstamos y mantén una visión clara de la cartera en todas tus agencias.</p>
+          <p>Una gestión clara y confiable para cada operación.</p>
         </div>
         <div className="intro-footer">Acceso exclusivo para trabajadores autorizados</div>
       </section>
@@ -307,8 +317,8 @@ function ClientesPanel({ token, trabajador, onNuevoPrestamo }: { token: string; 
   return (
     <div className="clientes-view">
       <div className="eyebrow">MÓDULO DE CLIENTES</div>
-      <h1>Identificación de clientes</h1>
-      <p className="muted">Consulta documentos y revisa el estado del cliente en {trabajador.agencia.nombre}.</p>
+      <h1>Clientes</h1>
+      <p className="muted">Consulta un documento o revisa los clientes registrados.</p>
       <div className="clients-grid">
         <section className="client-card">
           <h2>{tipoDocumento === 'RUC20' ? 'Buscar empresa' : 'Buscar persona'}</h2>
