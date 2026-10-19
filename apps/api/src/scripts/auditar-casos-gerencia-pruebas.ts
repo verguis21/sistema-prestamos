@@ -26,7 +26,15 @@ try {
     if(r.estadoCalculado==='EXTRAJUDICIAL')capitalExtra+=r.capitalDeCuotasPendientesCentimos;
   }
   const clientesEstado={SIN_PRESTAMOS:numeroClientes-clientes.size,SIN_DEUDA:0,VIGENTE:0,MOROSO:0,EXTRAJUDICIAL:0};
-  for(const lista of clientes.values())clientesEstado[estadoDeCliente(lista)]++;
+  for (const lista of clientes.values()) {
+    const estado = estadoDeCliente(lista);
+    // El estado LIQUIDADO corresponde al préstamo, no al cliente.
+    // La función actual devuelve SIN_DEUDA cuando todos los préstamos están liquidados.
+    if (estado === 'LIQUIDADO') {
+      throw new Error('Estado de cliente inesperado: LIQUIDADO.');
+    }
+    clientesEstado[estado]++;
+  }
   const sol=(c:number)=>(c/100).toFixed(2);
   console.log(JSON.stringify({ origen:'LECTURA_REAL_SUPABASE_PRUEBAS',hoy,clientes:numeroClientes,prestamos:prestamos.length,
     prestamosPorEstado:estados,clientesPorEstado:clientesEstado,

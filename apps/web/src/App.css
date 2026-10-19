@@ -696,3 +696,17 @@ input:focus-visible,select:focus-visible,button:focus-visible { outline:3px soli
   .schedule-page-table .schedule-table thead { display: table-header-group; }
   .schedule-page-table .schedule-table tr { break-inside: avoid; }
 }
+
+/* Actualización 19: búsqueda de representante sin saturar el formulario */
+.representantes-consulta { margin: 16px 0 10px; display: grid; gap: 8px; }
+.btn-representantes { align-self:start; padding: 11px 16px; background:#e7f2e9; color:#294e38; border:1px solid #b9d3bf; border-radius:10px; font-weight:700; cursor:pointer; }
+.btn-representantes:hover:not(:disabled) { background:#d9e9dc; }
+.btn-representantes:disabled { opacity:.65; cursor:wait; }
+.representantes-consulta small { font-size:12px; color:#61776a; line-height:1.4; }
+.representantes-lista { display:grid; gap:8px; max-height:240px; overflow-y:auto; }
+.representante-opcion { display:flex; align-items:flex-start; gap:10px; border:1px solid #d7e6da; padding:10px 12px; border-radius:10px; background:#f9fbf8; cursor:pointer; }
+.representante-opcion input { margin-top:4px; flex-shrink:0; }
+.representante-opcion span { display:grid; gap:3px; }
+.representante-opcion strong { color:#294734; font-size:13px; }
+.representantes-enlaces { display:flex; flex-wrap:wrap; gap:12px; margin:10px 0; font-size:12px; }
+.representantes-enlaces a { color:#315d43; text-decoration:underline; text-underline-offset:3px; }

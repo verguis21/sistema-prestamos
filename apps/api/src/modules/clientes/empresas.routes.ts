@@ -6,6 +6,7 @@ import { requireRole } from '../../middleware/require-role.js';
 import { crearRuc10DesdeDni, validarNumero, validarRuc20 } from './documentos.js';
 import { obtenerDatosCliente, obtenerDatosEmpresa, ConsultaIdentidadError } from './decolecta.js';
 import { estadoDeCliente, evaluarPrestamo, fechaPeru } from '../prestamos/estados.js';
+import { consultarRepresentantesRuc, proveedorRepresentantesConfigurado } from './representantes.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('ASESOR'));
@@ -14,6 +15,7 @@ const crearSchema = rucSchema.extend({
   representanteDni: z.string().regex(/^\d{8}$/),
   revisionPresencialConfirmada: z.literal(true),
   representacionDocumentada: z.literal(true),
+  consultaAutomatica: z.boolean().optional().default(false),
 });
 
 function fallo(res: import('express').Response, next: import('express').NextFunction, e: unknown) {
@@ -46,16 +48,40 @@ router.get('/consulta', async (req, res, next) => {
   catch (e) { fallo(res, next, e); }
 });
 
+// Consulta asistida: devuelve representantes informados por un servicio externo,
+// pero no certifica poderes vigentes. Siempre requiere comprobación documental.
+router.get('/representantes', async (req, res, next) => {
+  const input = rucSchema.safeParse(req.query);
+  if (!input.success || !validarRuc20(input.data.ruc)) {
+    res.status(400).json({ message: 'RUC 20 inválido.' }); return;
+  }
+  try {
+    const representantes = await consultarRepresentantesRuc(input.data.ruc);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ representantes, fuente: proveedorRepresentantesConfigurado(),
+      advertencia: 'La consulta identifica representantes informados; no acredita vigencia de poderes.' });
+  } catch (e) { fallo(res, next, e); }
+});
+
 // Una empresa NO es una segunda ficha de Cliente. Se vincula al representante por DNI.
 router.post('/', async (req, res, next) => {
   const input = crearSchema.safeParse(req.body);
   if (!input.success) { res.status(400).json({ message: 'Indica RUC 20, DNI del representante y confirma ambos documentos en agencia.' }); return; }
-  const { ruc, representanteDni } = input.data;
+  const { ruc, representanteDni, consultaAutomatica } = input.data;
   if (!validarRuc20(ruc)) { res.status(400).json({ message: 'RUC 20 con dígito verificador inválido.' }); return; }
   if (validarNumero('DNI', representanteDni)) { res.status(400).json({ message: 'DNI del representante inválido.' }); return; }
   try {
     const guardada = await prisma.empresa.findUnique({ where: { ruc } });
     if (guardada) { res.status(409).json({ message: 'La empresa ya existe. Busca su RUC para continuar. No se cambia el representante desde este formulario.' }); return; }
+    // Si fue seleccionado en búsqueda automática, corroborar nuevamente el DNI
+    // en backend: el cliente no puede suplantar el resultado manipulando el navegador.
+    if (consultaAutomatica) {
+      const representantes = await consultarRepresentantesRuc(ruc);
+      if (!representantes.some(r => r.dni === representanteDni)) {
+        res.status(409).json({ message: 'El DNI seleccionado no figura en la consulta actual de representantes. Revisa la información.' });
+        return;
+      }
+    }
     // Los datos de la razón social se consultan de nuevo en backend, no se aceptan del formulario.
     const datosEmpresa = await obtenerDatosEmpresa(ruc);
     // Nombre del representante = datos reales consultados por DNI, nunca transcripción libre.
